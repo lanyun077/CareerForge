@@ -1,0 +1,28 @@
+{
+  "name": "careerforge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI求职实训教练 —— 面向计算机专业学生的 AI 求职训练与复盘系统（MVP 框架）",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "next": "^14.2.5",
+    "pdf-parse": "^1.1.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/pdf-parse": "^1.1.4",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.39",
+    "tailwindcss": "^3.4.6",
+    "typescript": "^5.5.3"
+  }
+}
