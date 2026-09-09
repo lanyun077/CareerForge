@@ -23,6 +23,7 @@ create table if not exists resume_analyses (
 create table if not exists interview_sessions (
   id                  uuid primary key,
   role_id             text not null,
+  role_name           text not null default '',
   resume_analysis_id  uuid not null references resume_analyses (id) on delete cascade,
   -- 1 = 首轮训练，2 = 再次挑战
   round               int not null default 1,

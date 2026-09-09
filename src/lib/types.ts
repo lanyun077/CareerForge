@@ -242,3 +242,20 @@ export interface SessionSummary {
   questionCount: number;
   overallScore?: number;
 }
+
+/**
+ * 训练记录存储接口（方案 5.2「训练记录服务」）
+ * 实现见 src/lib/store/：内存版（默认）与 PostgreSQL 版（DATABASE_URL 启用）
+ */
+export interface Store {
+  kind: 'memory' | 'postgres';
+  saveResumeAnalysis(a: ResumeAnalysis): Promise<void>;
+  getResumeAnalysis(id: string): Promise<ResumeAnalysis | null>;
+  saveSession(s: InterviewSession): Promise<void>;
+  getSession(id: string): Promise<InterviewSession | null>;
+  saveReport(r: ReviewReport): Promise<void>;
+  getReportBySession(sessionId: string): Promise<ReviewReport | null>;
+  listSessions(): Promise<SessionSummary[]>;
+  /** 级联删除训练记录（隐私：用户可删除自己的训练数据） */
+  deleteRecord(sessionId: string): Promise<boolean>;
+}

@@ -18,7 +18,7 @@ const FLOW_STEPS = [
 interface Health {
   mode: 'llm' | 'fallback';
   llmModel: string | null;
-  store: string;
+  store: 'memory' | 'postgres';
   asrConfigured: boolean;
 }
 
@@ -59,7 +59,9 @@ export default function HomePage() {
               <Badge tone="amber">兜底模式 · 未配置大模型，使用固定题库 + 规则评分（仍可完整演示）</Badge>
             )
           ) : null}
-          <Badge tone="slate">存储：内存（重启清空）</Badge>
+          <Badge tone="slate">
+            存储：{health?.store === 'postgres' ? 'PostgreSQL（持久化）' : '内存（重启清空）'}
+          </Badge>
           <Badge tone="slate">语音转写：{health?.asrConfigured ? '已配置' : '未配置（文字输入）'}</Badge>
         </div>
         <div className="mt-5 flex flex-wrap gap-3">

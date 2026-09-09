@@ -7,17 +7,20 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "smoke": "node scripts/smoke.mjs"
+    "mock-llm": "node scripts/mock-llm.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:llm": "node scripts/smoke-llm.mjs"
   },
   "dependencies": {
+    "@types/pg": "^8.23.1",
     "next": "^14.2.5",
-    "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^6.3.289",
+    "pg": "^8.23.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
-    "@types/pdf-parse": "^1.1.4",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.19",

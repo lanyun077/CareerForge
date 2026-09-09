@@ -46,7 +46,7 @@ export async function analyzeResume(role: Role, resumeText: string): Promise<Res
     source: llmResult ? 'llm' : 'rule',
     createdAt: new Date().toISOString(),
   };
-  getStore().saveResumeAnalysis(analysis);
+  await getStore().saveResumeAnalysis(analysis);
   return analysis;
 }
 

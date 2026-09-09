@@ -41,23 +41,23 @@ export async function startSession(params: StartSessionParams): Promise<Intervie
 
   const store = getStore();
   let analysis = params.resumeAnalysisId
-    ? store.getResumeAnalysis(params.resumeAnalysisId)
+    ? await store.getResumeAnalysis(params.resumeAnalysisId)
     : null;
 
   if (round === 2) {
     if (!params.basedOnSessionId) {
       throw new ServiceError('再次挑战需要提供首轮训练的 sessionId', 400);
     }
-    const baseReport = store.getReportBySession(params.basedOnSessionId);
+    const baseReport = await store.getReportBySession(params.basedOnSessionId);
     if (!baseReport) {
       throw new ServiceError('未找到首轮复盘报告，无法生成专项挑战', 404);
     }
     focusWeaknesses = baseReport.nextChallenge.focusAreas;
     // 再次挑战未显式提供简历分析时，从首轮会话继承
     if (!analysis) {
-      const baseSession = store.getSession(params.basedOnSessionId);
+      const baseSession = await store.getSession(params.basedOnSessionId);
       if (!baseSession) throw new ServiceError('首轮训练会话不存在', 404);
-      analysis = store.getResumeAnalysis(baseSession.resumeAnalysisId);
+      analysis = await store.getResumeAnalysis(baseSession.resumeAnalysisId);
     }
   }
 
@@ -83,7 +83,7 @@ export async function startSession(params: StartSessionParams): Promise<Intervie
     status: 'active',
     startedAt: new Date().toISOString(),
   };
-  store.saveSession(session);
+  await store.saveSession(session);
   return session;
 }
 
@@ -93,14 +93,14 @@ export async function submitAnswer(
   rawAnswer: string,
 ): Promise<{ session: InterviewSession; event: 'followUp' | 'question' | 'completed' }> {
   const store = getStore();
-  const session = store.getSession(sessionId);
+  const session = await store.getSession(sessionId);
   if (!session) throw new ServiceError('训练会话不存在', 404);
   if (session.status !== 'active') throw new ServiceError('本次训练已结束', 400);
 
   const answer = rawAnswer.trim().slice(0, 5000);
   if (!answer) throw new ServiceError('回答内容不能为空', 422);
 
-  const analysis = store.getResumeAnalysis(session.resumeAnalysisId);
+  const analysis = await store.getResumeAnalysis(session.resumeAnalysisId);
   const q = session.questions[session.questions.length - 1];
   if (!q) throw new ServiceError('会话状态异常', 500);
 
@@ -113,7 +113,7 @@ export async function submitAnswer(
       const fu = await buildFollowUp(session, analysis, q, answer);
       if (fu) {
         q.followUps.push(fu);
-        store.saveSession(session);
+        await store.saveSession(session);
         return { session, event: 'followUp' };
       }
     }
@@ -126,7 +126,7 @@ export async function submitAnswer(
     event = await advance(session, analysis, q);
   }
 
-  store.saveSession(session);
+  await store.saveSession(session);
   return { session, event };
 }
 

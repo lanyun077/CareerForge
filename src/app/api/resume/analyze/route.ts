@@ -26,7 +26,8 @@ export async function POST(req: Request) {
         try {
           const { text } = await extractTextFromPdf(await file.arrayBuffer());
           resumeText = text;
-        } catch {
+        } catch (err) {
+          console.error('[resume/analyze] PDF 解析失败:', err);
           return fail(
             'PDF 解析失败：请确认上传的是文本型 PDF，或直接粘贴简历文本（推荐）。',
             422,

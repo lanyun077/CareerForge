@@ -42,7 +42,7 @@ AI组织针对性面试
 - **样式**：Tailwind CSS
 - **大模型**：OpenAI-compatible API（`chat/completions`），统一封装、JSON 输出校验、失败重试 1 次
 - **PDF 解析**：pdf-parse（仅文本型 PDF；失败自动降级为粘贴文本）
-- **存储**：当前为内存存储（重启清空）；PostgreSQL / Supabase 表结构见 [db/schema.sql](db/schema.sql)
+- **存储**：默认内存（重启清空）；配置 `DATABASE_URL` 即启用 PostgreSQL / Supabase 持久化，连接失败自动降级内存
 - **语音（可选）**：ASR 独立封装（`/api/asr`），未配置时文字输入，不阻塞主流程
 
 ## 快速开始
@@ -71,14 +71,33 @@ OPENAI_MODEL=gpt-4o-mini
 配置后首页会显示「在线模式」，简历分析、出题、追问、评分、复盘文案全部由模型生成；
 未配置或调用失败时自动降级，**面试流程不会因模型异常而中断**（方案 六）。
 
-### 冒烟测试（完整闭环验证）
+### 测试
 
 ```bash
-npm run build && npm run start   # 或 npm run dev
-node scripts/smoke.mjs           # 默认请求 http://127.0.0.1:3000
+# 1) 内存兜底模式回归（35 项断言，无需任何配置）
+npm run build && npm run start
+npm run smoke
+
+# 2) 在线链路验证（不消耗真实 API）：本地 mock 模型服务
+node scripts/mock-llm.mjs 3999 &                    # 正常模式
+OPENAI_API_KEY=mock OPENAI_BASE_URL=http://127.0.0.1:3999/v1 npm run start -- -p 3211
+npm run smoke:llm -- http://127.0.0.1:3211 --expect llm
+
+# 3) 降级链路验证：mock 切垃圾输出模式（--garbage），断言重试后走兜底且流程不中断
+node scripts/mock-llm.mjs 3999 --garbage &
+npm run smoke:llm -- http://127.0.0.1:3211 --expect fallback
 ```
 
-脚本会自动验证 MVP 验收标准的全部关键点（题数、追问引用、评分维度、两轮对比等）。
+测试语料见 [test-data/](test-data/)（10 份不同水平简历 + 30 条分类回答，方案 8.1）。
+
+### 数据持久化（可选）
+
+配置 `DATABASE_URL`（PostgreSQL / Supabase）并在数据库执行 [db/schema.sql](db/schema.sql) 即启用；
+存储层已接口化（`src/lib/store/`），数据库不可用时自动降级内存存储并在日志告警。
+
+### 公网部署
+
+见 [docs/部署指南.md](docs/部署指南.md)（Vercel + Supabase，约 30 分钟）。
 
 ## 降级与稳定性设计（方案 六）
 

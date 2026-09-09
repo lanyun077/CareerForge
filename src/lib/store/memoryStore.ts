@@ -3,59 +3,50 @@ import type {
   ResumeAnalysis,
   ReviewReport,
   SessionSummary,
+  Store,
 } from '@/lib/types';
+import { PostgresStore } from './postgresStore';
 
 /**
- * 训练记录存储接口（方案 5.2「训练记录服务」）
+ * 存储后端选择（方案 5.2「训练记录服务」）：
  *
- * 当前实现：内存存储（进程重启即清空，适合演示与开发）。
- * 接入 Supabase / PostgreSQL 时实现同接口替换即可，表结构见 db/schema.sql。
+ * - 未配置 DATABASE_URL：内存存储（进程重启即清空，适合本地开发）
+ * - 配置 DATABASE_URL：PostgreSQL / Supabase 持久化（表结构见 db/schema.sql），
+ *   连接失败时自动降级为内存存储并在日志中告警，保证演示不中断（方案 六）
  */
-export interface Store {
-  saveResumeAnalysis(a: ResumeAnalysis): void;
-  getResumeAnalysis(id: string): ResumeAnalysis | null;
-
-  saveSession(s: InterviewSession): void;
-  getSession(id: string): InterviewSession | null;
-
-  saveReport(r: ReviewReport): void;
-  getReportBySession(sessionId: string): ReviewReport | null;
-
-  listSessions(): SessionSummary[];
-  /** 级联删除训练记录（隐私：用户可删除自己的训练数据） */
-  deleteRecord(sessionId: string): boolean;
-}
 
 class MemoryStore implements Store {
+  kind = 'memory' as const;
+
   private resumeAnalyses = new Map<string, ResumeAnalysis>();
   private sessions = new Map<string, InterviewSession>();
   private reportsBySession = new Map<string, ReviewReport>();
 
-  saveResumeAnalysis(a: ResumeAnalysis): void {
+  async saveResumeAnalysis(a: ResumeAnalysis): Promise<void> {
     this.resumeAnalyses.set(a.id, a);
   }
 
-  getResumeAnalysis(id: string): ResumeAnalysis | null {
+  async getResumeAnalysis(id: string): Promise<ResumeAnalysis | null> {
     return this.resumeAnalyses.get(id) ?? null;
   }
 
-  saveSession(s: InterviewSession): void {
+  async saveSession(s: InterviewSession): Promise<void> {
     this.sessions.set(s.id, s);
   }
 
-  getSession(id: string): InterviewSession | null {
+  async getSession(id: string): Promise<InterviewSession | null> {
     return this.sessions.get(id) ?? null;
   }
 
-  saveReport(r: ReviewReport): void {
+  async saveReport(r: ReviewReport): Promise<void> {
     this.reportsBySession.set(r.sessionId, r);
   }
 
-  getReportBySession(sessionId: string): ReviewReport | null {
+  async getReportBySession(sessionId: string): Promise<ReviewReport | null> {
     return this.reportsBySession.get(sessionId) ?? null;
   }
 
-  listSessions(): SessionSummary[] {
+  async listSessions(): Promise<SessionSummary[]> {
     const out: SessionSummary[] = [];
     for (const s of this.sessions.values()) {
       const report = this.reportsBySession.get(s.id);
@@ -74,7 +65,7 @@ class MemoryStore implements Store {
     return out.sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
   }
 
-  deleteRecord(sessionId: string): boolean {
+  async deleteRecord(sessionId: string): Promise<boolean> {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
     this.sessions.delete(sessionId);
@@ -88,10 +79,75 @@ class MemoryStore implements Store {
   }
 }
 
+/** 外观：优先 PostgreSQL，任何一次数据库异常后降级内存并保持降级状态 */
+class StoreFacade implements Store {
+  kind: 'memory' | 'postgres';
+  private readonly primary: Store | null;
+  private readonly memory = new MemoryStore();
+  private degraded = false;
+
+  constructor() {
+    const url = process.env.DATABASE_URL?.trim();
+    this.primary = url ? new PostgresStore(url) : null;
+    this.kind = this.primary ? 'postgres' : 'memory';
+  }
+
+  private async run<T>(pgOp: () => Promise<T>, memOp: () => Promise<T>): Promise<T> {
+    if (this.primary && !this.degraded) {
+      try {
+        return await pgOp();
+      } catch (err) {
+        this.degraded = true;
+        this.kind = 'memory';
+        console.error(
+          '[store] PostgreSQL 不可用，本进程已降级为内存存储（重启后数据将丢失）：',
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+    return memOp();
+  }
+
+  async saveResumeAnalysis(a: ResumeAnalysis): Promise<void> {
+    return this.run(() => this.primary!.saveResumeAnalysis(a), () => this.memory.saveResumeAnalysis(a));
+  }
+
+  async getResumeAnalysis(id: string): Promise<ResumeAnalysis | null> {
+    return this.run(() => this.primary!.getResumeAnalysis(id), () => this.memory.getResumeAnalysis(id));
+  }
+
+  async saveSession(s: InterviewSession): Promise<void> {
+    return this.run(() => this.primary!.saveSession(s), () => this.memory.saveSession(s));
+  }
+
+  async getSession(id: string): Promise<InterviewSession | null> {
+    return this.run(() => this.primary!.getSession(id), () => this.memory.getSession(id));
+  }
+
+  async saveReport(r: ReviewReport): Promise<void> {
+    return this.run(() => this.primary!.saveReport(r), () => this.memory.saveReport(r));
+  }
+
+  async getReportBySession(sessionId: string): Promise<ReviewReport | null> {
+    return this.run(
+      () => this.primary!.getReportBySession(sessionId),
+      () => this.memory.getReportBySession(sessionId),
+    );
+  }
+
+  async listSessions(): Promise<SessionSummary[]> {
+    return this.run(() => this.primary!.listSessions(), () => this.memory.listSessions());
+  }
+
+  async deleteRecord(sessionId: string): Promise<boolean> {
+    return this.run(() => this.primary!.deleteRecord(sessionId), () => this.memory.deleteRecord(sessionId));
+  }
+}
+
 /** 全局单例：避免 Next.js dev 模式热重载导致状态丢失 */
 const g = globalThis as unknown as { __careerForgeStore?: Store };
 
 export function getStore(): Store {
-  if (!g.__careerForgeStore) g.__careerForgeStore = new MemoryStore();
+  if (!g.__careerForgeStore) g.__careerForgeStore = new StoreFacade();
   return g.__careerForgeStore;
 }

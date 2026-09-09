@@ -35,17 +35,17 @@ const DIM_ADVICE: Record<string, string> = {
 /** 生成（或返回缓存的）复盘报告 */
 export async function buildReport(sessionId: string): Promise<ReviewReport> {
   const store = getStore();
-  const cached = store.getReportBySession(sessionId);
+  const cached = await store.getReportBySession(sessionId);
   if (cached) return cached;
 
-  const session = store.getSession(sessionId);
+  const session = await store.getSession(sessionId);
   if (!session) throw new ServiceError('训练会话不存在', 404);
   if (session.status !== 'completed') {
     throw new ServiceError('本次训练尚未完成，完成全部问题后才能生成复盘报告', 409);
   }
   const role = getRole(session.roleId);
   if (!role) throw new ServiceError('岗位配置不存在', 500);
-  const analysis = store.getResumeAnalysis(session.resumeAnalysisId);
+  const analysis = await store.getResumeAnalysis(session.resumeAnalysisId);
 
   // 跨题聚合各维度分（取平均），证据取该维度得分最低一题的证据
   const dims: DimensionScore[] = role.scoringRubric.map((rd) => {
@@ -95,7 +95,7 @@ export async function buildReport(sessionId: string): Promise<ReviewReport> {
   // 第二轮：与首轮报告对比（方案 3.6）
   let comparison: ComparisonData | undefined;
   if (session.round === 2 && session.basedOnSessionId) {
-    const baseReport = store.getReportBySession(session.basedOnSessionId);
+    const baseReport = await store.getReportBySession(session.basedOnSessionId);
     if (baseReport) {
       const deltas: DimensionDelta[] = dims.map((d) => {
         const before = baseReport.dimensionScores.find((x) => x.id === d.id)?.score ?? 0;
@@ -147,7 +147,7 @@ export async function buildReport(sessionId: string): Promise<ReviewReport> {
     source: narrative ? 'llm' : 'rule',
     createdAt: new Date().toISOString(),
   };
-  store.saveReport(report);
+  await store.saveReport(report);
   return report;
 }
 

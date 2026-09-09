@@ -37,7 +37,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <p>
               报告中的分数为「模拟表现分 / 岗位准备度」，基于回答证据与固定评分规则计算，不是录取概率；不基于性别、年龄、地域、学校层次评价求职能力。
             </p>
-            <p>训练数据保存在服务器内存中（重启即清空），可在「训练记录」页随时删除。</p>
+            <p>
+              训练数据默认保存在服务器内存中（重启即清空）；配置 DATABASE_URL
+              后持久化到 PostgreSQL。均可随时删除。
+            </p>
           </div>
         </footer>
       </body>

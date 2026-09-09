@@ -1,0 +1,18 @@
+郑晓
+某大学 软件工程专业 本科大四
+求职意向：后端开发实习生
+
+技能：
+- 熟悉 Python 与 FastAPI/Django，理解 asyncio 异步编程
+- 熟悉 MySQL 索引优化与慢查询排查；熟悉 Redis 缓存与分布式锁
+- 熟悉 Docker 容器化部署，编写过 CI 脚本
+- 熟练使用 pytest 单元测试，了解 Celery 任务队列
+
+项目经历：
+秒杀抢购服务（FastAPI + MySQL + Redis + Docker）：
+- 独立设计秒杀链路：Redis 预扣库存 + 消息队列异步落库，压测 QPS 4200，零超卖
+- 缓存一致性采用延迟双删，商品详情接口命中率 96%
+- 全链路 Docker Compose 部署，pytest 覆盖率 91%
+
+数据报表定时任务（Python + Celery + MySQL）：
+- 每日增量处理 30 万条订单数据，生成运营报表，任务失败自动重试，成功率 99.8%
