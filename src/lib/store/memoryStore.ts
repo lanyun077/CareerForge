@@ -4,6 +4,9 @@ import type {
   ReviewReport,
   SessionSummary,
   Store,
+  JobPosting,
+  RecommendationRecord,
+  RoleSnapshot,
 } from '@/lib/types';
 import { PostgresStore } from './postgresStore';
 
@@ -21,6 +24,9 @@ class MemoryStore implements Store {
   private resumeAnalyses = new Map<string, ResumeAnalysis>();
   private sessions = new Map<string, InterviewSession>();
   private reportsBySession = new Map<string, ReviewReport>();
+  private jobPostings = new Map<string, JobPosting>();
+  private recommendations = new Map<string, RecommendationRecord>();
+  private roleSnapshots = new Map<string, RoleSnapshot>();
 
   async saveResumeAnalysis(a: ResumeAnalysis): Promise<void> {
     this.resumeAnalyses.set(a.id, a);
@@ -76,6 +82,26 @@ class MemoryStore implements Store {
     );
     if (!stillUsed) this.resumeAnalyses.delete(session.resumeAnalysisId);
     return true;
+  }
+
+  async saveJobPosting(job: JobPosting): Promise<void> {
+    this.jobPostings.set(job.id, job);
+  }
+
+  async getJobPosting(id: string): Promise<JobPosting | null> {
+    return this.jobPostings.get(id) ?? null;
+  }
+
+  async listJobPostings(): Promise<JobPosting[]> {
+    return [...this.jobPostings.values()].sort((a, b) => (a.fetchedAt < b.fetchedAt ? 1 : -1));
+  }
+
+  async saveRecommendation(record: RecommendationRecord): Promise<void> {
+    this.recommendations.set(record.id, record);
+  }
+
+  async saveRoleSnapshot(snapshot: RoleSnapshot): Promise<void> {
+    this.roleSnapshots.set(snapshot.id, snapshot);
   }
 }
 
@@ -141,6 +167,26 @@ class StoreFacade implements Store {
 
   async deleteRecord(sessionId: string): Promise<boolean> {
     return this.run(() => this.primary!.deleteRecord(sessionId), () => this.memory.deleteRecord(sessionId));
+  }
+
+  async saveJobPosting(job: JobPosting): Promise<void> {
+    return this.run(() => this.primary!.saveJobPosting(job), () => this.memory.saveJobPosting(job));
+  }
+
+  async getJobPosting(id: string): Promise<JobPosting | null> {
+    return this.run(() => this.primary!.getJobPosting(id), () => this.memory.getJobPosting(id));
+  }
+
+  async listJobPostings(): Promise<JobPosting[]> {
+    return this.run(() => this.primary!.listJobPostings(), () => this.memory.listJobPostings());
+  }
+
+  async saveRecommendation(record: RecommendationRecord): Promise<void> {
+    return this.run(() => this.primary!.saveRecommendation(record), () => this.memory.saveRecommendation(record));
+  }
+
+  async saveRoleSnapshot(snapshot: RoleSnapshot): Promise<void> {
+    return this.run(() => this.primary!.saveRoleSnapshot(snapshot), () => this.memory.saveRoleSnapshot(snapshot));
   }
 }
 

@@ -14,6 +14,9 @@ import type {
   ReviewReport,
   SessionSummary,
   Store,
+  JobPosting,
+  RecommendationRecord,
+  RoleSnapshot,
 } from '@/lib/types';
 interface PgSessionRow {
   id: string;
@@ -23,6 +26,7 @@ interface PgSessionRow {
   round: number;
   based_on_session_id: string | null;
   focus_weaknesses: string[] | null;
+  role_snapshot: InterviewSession['roleSnapshot'] | null;
   plan: InterviewSession['plan'];
   current_plan_index: number;
   questions: InterviewSession['questions'];
@@ -40,6 +44,7 @@ function rowToSession(row: PgSessionRow): InterviewSession {
     round: row.round,
     basedOnSessionId: row.based_on_session_id ?? undefined,
     focusWeaknesses: row.focus_weaknesses ?? undefined,
+    roleSnapshot: row.role_snapshot ?? undefined,
     plan: row.plan,
     currentPlanIndex: row.current_plan_index,
     questions: row.questions,
@@ -83,14 +88,15 @@ export class PostgresStore implements Store {
     await this.pool.query(
       `insert into interview_sessions
          (id, role_id, role_name, resume_analysis_id, round, based_on_session_id,
-          focus_weaknesses, plan, current_plan_index, questions, status, started_at, finished_at)
-       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10::jsonb, $11, $12, $13)
+         focus_weaknesses, role_snapshot, plan, current_plan_index, questions, status, started_at, finished_at)
+       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11::jsonb, $12, $13, $14)
        on conflict (id) do update
          set current_plan_index = excluded.current_plan_index,
              questions = excluded.questions,
              status = excluded.status,
              finished_at = excluded.finished_at,
-             focus_weaknesses = excluded.focus_weaknesses`,
+             focus_weaknesses = excluded.focus_weaknesses,
+             role_snapshot = excluded.role_snapshot`,
       [
         s.id,
         s.roleId,
@@ -99,6 +105,7 @@ export class PostgresStore implements Store {
         s.round,
         s.basedOnSessionId ?? null,
         JSON.stringify(s.focusWeaknesses ?? null),
+        JSON.stringify(s.roleSnapshot ?? null),
         JSON.stringify(s.plan),
         s.currentPlanIndex,
         JSON.stringify(s.questions),
@@ -188,5 +195,61 @@ export class PostgresStore implements Store {
       );
     }
     return true;
+  }
+
+  async saveJobPosting(job: JobPosting): Promise<void> {
+    await this.pool.query(
+      `insert into job_postings
+         (id, title, description, raw_description, source, source_url, company, location,
+          salary, experience_level, published_at, fetched_at, expires_at, payload)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb)
+       on conflict (id) do update set
+         title = excluded.title,
+         description = excluded.description,
+         raw_description = excluded.raw_description,
+         payload = excluded.payload`,
+      [
+        job.id,
+        job.name,
+        job.description,
+        job.rawDescription,
+        job.source,
+        job.sourceUrl ?? null,
+        job.company ?? null,
+        job.location ?? null,
+        job.salary ?? null,
+        job.experienceLevel ?? null,
+        job.publishedAt ?? null,
+        job.fetchedAt,
+        job.expiresAt ?? null,
+        JSON.stringify(job),
+      ],
+    );
+  }
+
+  async getJobPosting(id: string): Promise<JobPosting | null> {
+    const r = await this.pool.query('select payload from job_postings where id = $1', [id]);
+    return (r.rows[0]?.payload as JobPosting | undefined) ?? null;
+  }
+
+  async listJobPostings(): Promise<JobPosting[]> {
+    const r = await this.pool.query('select payload from job_postings order by fetched_at desc');
+    return r.rows.map((row: { payload: JobPosting }) => row.payload);
+  }
+
+  async saveRecommendation(record: RecommendationRecord): Promise<void> {
+    await this.pool.query(
+      `insert into recommendation_runs (id, resume_text, recommendations, created_at)
+       values ($1, $2, $3::jsonb, $4)`,
+      [record.id, record.resumeText, JSON.stringify(record.recommendations), record.createdAt],
+    );
+  }
+
+  async saveRoleSnapshot(snapshot: RoleSnapshot): Promise<void> {
+    await this.pool.query(
+      `insert into role_snapshots (id, reference_id, context, role_id, payload, created_at)
+       values ($1, $2, $3, $4, $5::jsonb, $6)`,
+      [snapshot.id, snapshot.referenceId, snapshot.context, snapshot.roleId, JSON.stringify(snapshot.role), snapshot.createdAt],
+    );
   }
 }

@@ -5,4 +5,156 @@
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  background: #f4f7fb;
+  color: #172033;
+}
+
+::selection {
+  background: #c7e9e4;
+  color: #123b3a;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease,
+    box-shadow 160ms ease, transform 160ms ease;
+}
+
+button:active,
+a:active {
+  transform: translateY(1px);
+}
+
+@layer components {
+  .cf-shell {
+    background: #f4f7fb;
+  }
+
+  .cf-section {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #ffffff;
+    box-shadow: 0 8px 24px rgba(23, 32, 51, 0.045);
+  }
+
+  .cf-eyebrow {
+    color: #16847d;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .cf-button-primary {
+    border-radius: 8px;
+    background: #176b67;
+    color: white;
+    box-shadow: 0 5px 12px rgba(23, 107, 103, 0.2);
+  }
+
+  .cf-button-primary:hover {
+    background: #115854;
+    box-shadow: 0 7px 16px rgba(23, 107, 103, 0.27);
+  }
+
+  .cf-button-secondary {
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #fff;
+    color: #334155;
+  }
+
+  .cf-button-secondary:hover {
+    border-color: #79bdb8;
+    background: #f0faf9;
+    color: #176b67;
+  }
+
+  .cf-input {
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    background: #fbfdff;
+  }
+
+  .cf-input:focus {
+    border-color: #3caaa3;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(60, 170, 163, 0.14);
+  }
+
+  .cf-hero-panel {
+    border: 1px solid #24404c;
+    border-radius: 14px;
+    background: #172033;
+    padding: 1.5rem;
+    box-shadow: 0 14px 36px rgba(23, 32, 51, 0.16);
+  }
+
+  .cf-answer-panel {
+    border: 1px solid #b9ded9;
+    border-radius: 12px;
+    background: #eef8f7;
+    padding: 1.1rem;
+    box-shadow: 0 8px 22px rgba(23, 107, 103, 0.08);
+  }
+
+  .cf-transcript-item {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #fff;
+    padding: 1rem;
+    box-shadow: 0 4px 14px rgba(23, 32, 51, 0.035);
+  }
+
+  .cf-transcript-item.is-current {
+    border-color: #79bdb8;
+    box-shadow: 0 8px 20px rgba(43, 155, 148, 0.12);
+  }
+
+  .cf-step-dot {
+    display: flex;
+    height: 2rem;
+    width: 2rem;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: #e7f5f4;
+    color: #176b67;
+    font-size: 0.7rem;
+    font-weight: 700;
+  }
+
+  .cf-stat {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.75rem;
+  }
+
+  .cf-stat span {
+    display: block;
+    color: #94a3b8;
+    font-size: 0.7rem;
+  }
+
+  .cf-stat strong {
+    display: block;
+    margin-top: 0.35rem;
+    color: #fff;
+    font-size: 1.35rem;
+    line-height: 1;
+  }
+
+  .cf-loading,
+  .cf-empty {
+    border: 1px dashed #cbd5e1;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.7);
+    padding: 2rem;
+    text-align: center;
+  }
 }

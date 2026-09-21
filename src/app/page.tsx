@@ -3,16 +3,13 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Badge, Section } from '@/app/components/Section';
-import type { Role } from '@/lib/types';
+import type { RoleTarget } from '@/lib/types';
 
 const FLOW_STEPS = [
-  '选择目标岗位',
-  '输入简历',
-  '岗位缺口分析',
-  '模拟面试 + 针对性追问',
-  '复盘报告（证据评分）',
-  '二次专项挑战',
-  '两次训练对比',
+  ['01', '准备材料', '上传简历或粘贴真实 JD'],
+  ['02', '岗位匹配', 'AI 解析能力与岗位要求'],
+  ['03', '模拟面试', '针对岗位生成问题与追问'],
+  ['04', '复盘提升', '证据评分与二次挑战'],
 ];
 
 interface Health {
@@ -23,14 +20,14 @@ interface Health {
 }
 
 export default function HomePage() {
-  const [role, setRole] = useState<Role | null>(null);
+  const [roles, setRoles] = useState<RoleTarget[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
 
   useEffect(() => {
     fetch('/api/roles')
       .then((r) => r.json())
       .then((b) => {
-        if (b.ok && b.data.length) setRole(b.data[0] as Role);
+        if (b.ok) setRoles(b.data as RoleTarget[]);
       })
       .catch(() => undefined);
     fetch('/api/health')
@@ -41,94 +38,73 @@ export default function HomePage() {
       .catch(() => undefined);
   }, []);
 
-  const roleId = role?.id ?? '';
+  const roleId = roles[0]?.id ?? '';
 
   return (
     <div className="space-y-6">
-      <section className="rounded-lg bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-bold">AI求职实训教练</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600">
-          面向计算机专业学生的 AI 求职训练与复盘系统：根据目标岗位、你的简历和面试回答组织针对性训练，
-          把「表现不好」变成「下一轮可以执行的改进建议」，并验证改进效果。
-        </p>
-        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs">
+      <section className="overflow-hidden rounded-xl border border-[#24404c] bg-[#172033] text-white shadow-[0_14px_36px_rgba(23,32,51,0.16)]">
+        <div className="grid gap-8 px-6 py-8 md:grid-cols-[1.3fr_0.7fr] md:px-9 md:py-10">
+          <div>
+            <p className="cf-eyebrow text-[#78d2c8]">CAREER TRAINING WORKSPACE</p>
+            <h1 className="mt-3 max-w-2xl text-3xl font-bold tracking-tight md:text-4xl">把每一次面试，变成下一次进步的证据。</h1>
+            <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300">
+              从简历解析、岗位匹配到模拟面试和复盘建议，CareerForge 帮你围绕真实求职目标持续训练，而不是只练习一套固定题目。
+            </p>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Link href={`/resume?roleId=${roleId}`} className="cf-button-primary px-5 py-2.5 text-sm font-semibold">
+                开始一次训练 <span className="ml-1">→</span>
+              </Link>
+              <Link href={`/resume?roleId=${roleId}&demo=basic`} className="rounded-lg border border-white/25 px-5 py-2.5 text-sm font-medium text-white hover:bg-white/10">
+                查看演示案例
+              </Link>
+            </div>
+          </div>
+          <div className="flex flex-col justify-end rounded-xl border border-white/10 bg-white/5 p-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Workspace status</p>
+            <div className="mt-4 space-y-3 text-sm">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3"><span className="text-slate-400">职业方向</span><span className="font-semibold">{roles.length || '—'} 个可选</span></div>
+              <div className="flex items-center justify-between border-b border-white/10 pb-3"><span className="text-slate-400">AI 引擎</span><span className="font-semibold text-[#8be0d6]">{health?.mode === 'llm' ? health.llmModel : '规则兜底'}</span></div>
+              <div className="flex items-center justify-between"><span className="text-slate-400">训练记录</span><span className="font-semibold">可追踪复盘</span></div>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-white/10 bg-black/10 px-6 py-3 text-xs md:px-9">
           {health ? (
             health.mode === 'llm' ? (
-              <Badge tone="green">在线模式 · 大模型已配置（{health.llmModel}）</Badge>
+              <Badge tone="green">在线模式 · {health.llmModel}</Badge>
             ) : (
-              <Badge tone="amber">兜底模式 · 未配置大模型，使用固定题库 + 规则评分（仍可完整演示）</Badge>
+              <Badge tone="amber">兜底模式 · 固定题库 + 规则评分</Badge>
             )
           ) : null}
-          <Badge tone="slate">
-            存储：{health?.store === 'postgres' ? 'PostgreSQL（持久化）' : '内存（重启清空）'}
-          </Badge>
-          <Badge tone="slate">语音转写：{health?.asrConfigured ? '已配置' : '未配置（文字输入）'}</Badge>
-        </div>
-        <div className="mt-5 flex flex-wrap gap-3">
-          <Link
-            href={`/resume?roleId=${roleId}`}
-            className="rounded-md bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            开始训练
-          </Link>
-          <Link
-            href={`/resume?roleId=${roleId}&demo=basic`}
-            className="rounded-md border border-blue-600 px-5 py-2.5 text-sm font-medium text-blue-600 hover:bg-blue-50"
-          >
-            用演示简历体验（推荐评委）
-          </Link>
-          <Link
-            href="/records"
-            className="rounded-md border border-slate-300 px-5 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
-          >
-            训练记录
-          </Link>
+          <span className="text-slate-400">数据存储：{health?.store === 'postgres' ? 'PostgreSQL' : '内存'}</span>
         </div>
       </section>
 
-      <Section title="训练闭环" hint="不是一次性问答，而是「训练 → 复盘 → 再挑战 → 对比」的完整循环">
-        <ol className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
-          {FLOW_STEPS.map((s, i) => (
-            <li key={s} className="rounded border border-slate-200 bg-slate-50 px-3 py-2">
-              <span className="mr-1 font-semibold text-blue-600">{i + 1}.</span>
-              {s}
+      <Section title="训练路径" hint="一次训练包含四个阶段，所有建议都围绕你选择的岗位生成">
+        <ol className="grid gap-3 md:grid-cols-4">
+          {FLOW_STEPS.map(([number, title, detail], i) => (
+            <li key={number} className="relative rounded-lg border border-slate-200 bg-[#f8fbfc] p-4">
+              <span className="text-xs font-bold tracking-[0.12em] text-[#2b9b94]">{number}</span>
+              <p className="mt-3 font-semibold text-slate-800">{title}</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>
+              {i < FLOW_STEPS.length - 1 ? <span className="absolute -right-2 top-1/2 z-10 hidden text-slate-300 md:block">→</span> : null}
             </li>
           ))}
         </ol>
       </Section>
 
-      {role ? (
-        <Section
-          title="岗位配置"
-          hint={role.mockNotice}
-        >
-          <div className="space-y-4 text-sm">
-            <div>
-              <p className="font-medium text-slate-700">{role.name}</p>
-              <p className="mt-1 text-slate-500">{role.description}</p>
-            </div>
-            <div>
-              <p className="mb-1 font-medium text-slate-700">必备技能</p>
-              <div className="flex flex-wrap gap-1.5">
-                {role.requirements.requiredSkills.map((s) => (
-                  <Badge key={s.label} tone="blue">
-                    {s.label}
-                  </Badge>
-                ))}
+      {roles.length ? (
+        <Section title="职业方向库" hint="从软件工程、AI/Agent、数据、基础设施和安全方向中选择训练目标">
+          <div className="grid gap-3 md:grid-cols-2">
+            {roles.map((role) => (
+              <div key={role.id} className="rounded border border-slate-200 p-3 text-sm">
+                <p className="font-medium text-slate-700">{role.name}</p>
+                <p className="mt-1 text-xs text-slate-500">{role.description}</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {role.requirements.requiredSkills.slice(0, 4).map((s) => <Badge key={s.label} tone="blue">{s.label}</Badge>)}
+                </div>
               </div>
-            </div>
-            <div>
-              <p className="mb-1 font-medium text-slate-700">加分技能</p>
-              <div className="flex flex-wrap gap-1.5">
-                {role.requirements.preferredSkills.map((s) => (
-                  <Badge key={s.label}>{s.label}</Badge>
-                ))}
-              </div>
-            </div>
-            <div className="text-xs text-slate-500">
-              面试阶段：{role.interviewStages.map((s) => s.name).join(' → ')} · 共约{' '}
-              {role.interviewStages.reduce((n, s) => n + s.questionCount, 0)} 题，每题最多追问 1 次
-            </div>
+            ))}
           </div>
         </Section>
       ) : (

@@ -1,13 +1,16 @@
-import type { Role } from '@/lib/types';
+import type { RoleProfile } from '@/lib/types';
 
 /**
  * 首版唯一岗位：Python 后端开发实习生（模拟岗位）
  * 对应项目方案 3.1 岗位配置：职责 / 必备技能 / 加分技能 / 常见项目类型 /
  * 面试阶段 / 评分维度与评分规则 / 预设面试问题
  */
-export const pythonBackendIntern: Role = {
+export const pythonBackendIntern: RoleProfile = {
+  kind: 'role_profile',
   id: 'python-backend-intern',
   name: 'Python 后端开发实习生',
+  category: '软件工程',
+  aliases: ['Python 后端', 'Python 开发', '后端开发实习生'],
   description: '互联网公司后端开发实习岗位：参与后端服务开发、接口设计与数据库优化。',
   isMock: true,
   mockNotice: '本岗位为模拟岗位（互联网公司 Python 后端开发实习生），不代表任何真实公司的招聘标准。',

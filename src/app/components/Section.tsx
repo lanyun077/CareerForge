@@ -11,10 +11,10 @@ export function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-5">
-      <div className="mb-3">
-        <h2 className="text-base font-semibold text-slate-800">{title}</h2>
-        {hint ? <p className="mt-0.5 text-xs text-slate-500">{hint}</p> : null}
+    <section className="cf-section p-5 md:p-6">
+      <div className="mb-4">
+        <h2 className="text-base font-semibold tracking-tight text-slate-800">{title}</h2>
+        {hint ? <p className="mt-1 text-xs leading-relaxed text-slate-500">{hint}</p> : null}
       </div>
       {children}
     </section>
@@ -30,10 +30,10 @@ export function Badge({
 }) {
   const tones: Record<string, string> = {
     slate: 'bg-slate-100 text-slate-600',
-    blue: 'bg-blue-50 text-blue-700',
-    green: 'bg-green-50 text-green-700',
+    blue: 'bg-[#e7f5f4] text-[#176b67]',
+    green: 'bg-emerald-50 text-emerald-700',
     amber: 'bg-amber-50 text-amber-700',
-    red: 'bg-red-50 text-red-700',
+    red: 'bg-rose-50 text-rose-700',
   };
   return (
     <span className={`inline-block rounded px-1.5 py-0.5 text-xs ${tones[tone]}`}>{children}</span>

@@ -1,6 +1,6 @@
 import { fail, ok } from '@/lib/api';
 import { extractTextFromPdf } from '@/lib/parser/pdf';
-import { getRole } from '@/lib/roles';
+import { getTargetRole } from '@/lib/services/roleService';
 import { analyzeResume } from '@/lib/services/resumeService';
 
 export const runtime = 'nodejs';
@@ -41,7 +41,7 @@ export async function POST(req: Request) {
       resumeText = (body.resumeText ?? '').trim();
     }
 
-    const role = getRole(roleId);
+    const role = await getTargetRole(roleId);
     if (!role) return fail('岗位不存在', 404);
     if (resumeText.length < MIN_TEXT) {
       return fail(`简历文本过短（至少 ${MIN_TEXT} 字），请粘贴完整简历内容`, 422, 'resume_too_short');

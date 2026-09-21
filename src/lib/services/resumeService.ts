@@ -6,7 +6,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import type { ExtractedProject, ResumeAnalysis, ResumeGap, Role } from '@/lib/types';
+import type { ExtractedProject, ResumeAnalysis, ResumeGap, RoleTarget } from '@/lib/types';
 import { chatJSON } from '@/lib/llm/client';
 import { RESUME_ANALYSIS_SYSTEM } from '@/lib/llm/prompts';
 import { validateResumeAnalysis } from '@/lib/llm/validate';
@@ -20,7 +20,7 @@ const TECH_KEYWORDS = [
   'pytest', 'html', 'css', 'javascript', 'vue', 'react',
 ];
 
-export async function analyzeResume(role: Role, resumeText: string): Promise<ResumeAnalysis> {
+export async function analyzeResume(role: RoleTarget, resumeText: string): Promise<ResumeAnalysis> {
   const ruleBase = ruleAnalyze(role, resumeText);
 
   const llmResult = await chatJSON<AnalysisCore>({
@@ -41,18 +41,27 @@ export async function analyzeResume(role: Role, resumeText: string): Promise<Res
   const analysis: ResumeAnalysis = {
     id: randomUUID(),
     roleId: role.id,
+    roleSnapshot: role,
     resumeText,
     ...(llmResult ?? ruleBase),
     source: llmResult ? 'llm' : 'rule',
     createdAt: new Date().toISOString(),
   };
   await getStore().saveResumeAnalysis(analysis);
+  await getStore().saveRoleSnapshot({
+    id: randomUUID(),
+    referenceId: analysis.id,
+    context: 'resume_analysis',
+    roleId: role.id,
+    role,
+    createdAt: analysis.createdAt,
+  });
   return analysis;
 }
 
 // ---------- 大模型提示 ----------
 
-function buildResumeUserPrompt(role: Role, resumeText: string): string {
+function buildResumeUserPrompt(role: RoleTarget, resumeText: string): string {
   const skills = [
     ...role.requirements.requiredSkills.map((s) => `必备：${s.label}`),
     ...role.requirements.preferredSkills.map((s) => `加分：${s.label}`),
@@ -62,7 +71,7 @@ function buildResumeUserPrompt(role: Role, resumeText: string): string {
 
 // ---------- 规则兜底分析 ----------
 
-function ruleAnalyze(role: Role, resumeText: string): AnalysisCore {
+function ruleAnalyze(role: RoleTarget, resumeText: string): AnalysisCore {
   const lower = resumeText.toLowerCase();
   const hit = (keywords: string[]) => keywords.some((k) => lower.includes(k.toLowerCase()));
 
@@ -140,9 +149,9 @@ function detectVague(text: string, projects: ExtractedProject[]): string[] {
 }
 
 function buildSuggestions(
-  gapSkills: Role['requirements']['requiredSkills'],
+  gapSkills: RoleTarget['requirements']['requiredSkills'],
   vagueIssues: string[],
-  role: Role,
+  role: RoleTarget,
 ): ResumeAnalysis['suggestions'] {
   const out: ResumeAnalysis['suggestions'] = [];
   if (gapSkills.length) {

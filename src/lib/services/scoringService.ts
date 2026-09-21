@@ -5,7 +5,7 @@
  * 最终得分一律由后端按固定权重公式计算，保证可解释、可复现。
  */
 
-import type { AskedQuestion, DimensionScore, ResumeAnalysis, Role } from '@/lib/types';
+import type { AskedQuestion, DimensionScore, ResumeAnalysis, RoleTarget } from '@/lib/types';
 import { chatJSON } from '@/lib/llm/client';
 import { SCORING_SYSTEM } from '@/lib/llm/prompts';
 import { validateScoring } from '@/lib/llm/validate';
@@ -26,7 +26,7 @@ const RULE_SUGGESTIONS: Record<string, string> = {
 
 /** 对一道题（含追问回答）评分：LLM 优先，失败 / 部分缺失时用规则兜底补齐 */
 export async function scoreQuestion(
-  role: Role,
+  role: RoleTarget,
   analysis: ResumeAnalysis | null,
   q: AskedQuestion,
 ): Promise<DimensionScore[]> {
@@ -50,7 +50,7 @@ export async function scoreQuestion(
 
 /** 规则兜底评分：基于回答特征（长度 / 数字 / STAR 关键词 / 技术词覆盖），
  *  上限 4 分——规则不给满分，避免虚高 */
-function ruleScoreOne(role: Role, dimId: string, merged: string): DimensionScore {
+function ruleScoreOne(role: RoleTarget, dimId: string, merged: string): DimensionScore {
   const rd = role.scoringRubric.find((d) => d.id === dimId)!;
   const len = merged.length;
   const hasNumbers = /\d/.test(merged);
@@ -107,7 +107,7 @@ function mergeAnswer(q: AskedQuestion): string {
 }
 
 function buildScoringUserPrompt(
-  role: Role,
+  role: RoleTarget,
   analysis: ResumeAnalysis | null,
   q: AskedQuestion,
   merged: string,

@@ -11,7 +11,7 @@ import { ServiceError } from '@/lib/api';
 import { chatJSON } from '@/lib/llm/client';
 import { REPORT_NARRATIVE_SYSTEM } from '@/lib/llm/prompts';
 import { validateReportNarrative, type ReportNarrative } from '@/lib/llm/validate';
-import { getRole } from '@/lib/roles';
+import { getTargetRole } from './roleService';
 import { getStore } from '@/lib/store/memoryStore';
 import type {
   ComparisonData,
@@ -19,7 +19,7 @@ import type {
   DimensionScore,
   InterviewSession,
   ReviewReport,
-  Role,
+  RoleTarget,
 } from '@/lib/types';
 import { DIM_TAGS } from './interviewService';
 import { computeOverall } from './scoringService';
@@ -43,9 +43,9 @@ export async function buildReport(sessionId: string): Promise<ReviewReport> {
   if (session.status !== 'completed') {
     throw new ServiceError('本次训练尚未完成，完成全部问题后才能生成复盘报告', 409);
   }
-  const role = getRole(session.roleId);
-  if (!role) throw new ServiceError('岗位配置不存在', 500);
   const analysis = await store.getResumeAnalysis(session.resumeAnalysisId);
+  const role = session.roleSnapshot ?? analysis?.roleSnapshot ?? await getTargetRole(session.roleId);
+  if (!role) throw new ServiceError('岗位配置不存在', 500);
 
   // 跨题聚合各维度分（取平均），证据取该维度得分最低一题的证据
   const dims: DimensionScore[] = role.scoringRubric.map((rd) => {
@@ -159,7 +159,7 @@ function readinessText(overall: number, weakestName: string): string {
 }
 
 function buildNextChallenge(
-  role: Role,
+  role: RoleTarget,
   sortedDims: DimensionScore[],
 ): { focusAreas: string[]; description: string; recommendedQuestions: string[] } {
   const weak = sortedDims.slice(0, 2);
@@ -181,7 +181,7 @@ function buildNextChallenge(
 }
 
 function buildNarrativeUserPrompt(
-  role: Role,
+  role: RoleTarget,
   session: InterviewSession,
   dims: DimensionScore[],
   overall: number,

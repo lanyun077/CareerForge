@@ -15,14 +15,14 @@ import {
   validatePlanQuestions,
   type PlanQuestion,
 } from '@/lib/llm/validate';
-import { getRole } from '@/lib/roles';
+import { getTargetRole } from './roleService';
 import { getStore } from '@/lib/store/memoryStore';
 import type {
   AskedQuestion,
   FollowUp,
   InterviewSession,
   ResumeAnalysis,
-  Role,
+  RoleTarget,
   StagePlanItem,
 } from '@/lib/types';
 import { scoreQuestion } from './scoringService';
@@ -64,7 +64,7 @@ export async function startSession(params: StartSessionParams): Promise<Intervie
   if (!analysis) {
     throw new ServiceError('简历分析记录不存在，请先完成简历分析', 404);
   }
-  const role = getRole(analysis.roleId);
+  const role = analysis.roleSnapshot ?? await getTargetRole(analysis.roleId);
   if (!role) throw new ServiceError('岗位配置不存在', 500);
 
   const plan = await buildPlan(role, analysis, { round, focusWeaknesses });
@@ -73,6 +73,7 @@ export async function startSession(params: StartSessionParams): Promise<Intervie
     id: randomUUID(),
     roleId: role.id,
     roleName: role.name,
+    roleSnapshot: role,
     resumeAnalysisId: analysis.id,
     round,
     basedOnSessionId: round === 2 ? params.basedOnSessionId : undefined,
@@ -84,6 +85,14 @@ export async function startSession(params: StartSessionParams): Promise<Intervie
     startedAt: new Date().toISOString(),
   };
   await store.saveSession(session);
+  await store.saveRoleSnapshot({
+    id: randomUUID(),
+    referenceId: session.id,
+    context: 'interview_session',
+    roleId: role.id,
+    role,
+    createdAt: session.startedAt,
+  });
   return session;
 }
 
@@ -142,7 +151,7 @@ export const DIM_TAGS: Record<string, string[]> = {
 };
 
 async function buildPlan(
-  role: Role,
+  role: RoleTarget,
   analysis: ResumeAnalysis,
   opts: { round: number; focusWeaknesses: string[] },
 ): Promise<StagePlanItem[]> {
@@ -184,7 +193,7 @@ async function buildPlan(
 
 /** 从固定题库选题（兜底通道；第二轮按薄弱维度标签过滤） */
 function selectFromBank(
-  role: Role,
+  role: RoleTarget,
   opts: { round: number; focusWeaknesses: string[] },
 ): StagePlanItem[] {
   const dimIds = new Set<string>();
@@ -209,7 +218,7 @@ function selectFromBank(
 }
 
 function buildPlanUserPrompt(
-  role: Role,
+  role: RoleTarget,
   analysis: ResumeAnalysis,
   opts: { round: number; focusWeaknesses: string[] },
   bankTexts: string[],
@@ -245,7 +254,7 @@ async function buildFollowUp(
   // 总结题不追问
   if (q.stageId === 'wrap') return null;
 
-  const role = getRole(session.roleId);
+  const role = analysis?.roleSnapshot ?? session.roleSnapshot ?? await getTargetRole(session.roleId);
   if (!role) return null;
 
   const asked = session.questions.map((x) => x.text);
@@ -297,7 +306,7 @@ function ruleFollowUp(
 }
 
 function buildFollowUpUserPrompt(
-  role: Role,
+  role: RoleTarget,
   analysis: ResumeAnalysis | null,
   q: AskedQuestion,
   answer: string,
@@ -320,7 +329,7 @@ async function advance(
   analysis: ResumeAnalysis | null,
   q: AskedQuestion,
 ): Promise<'question' | 'completed'> {
-  const role = getRole(session.roleId);
+  const role = analysis?.roleSnapshot ?? session.roleSnapshot ?? await getTargetRole(session.roleId);
   if (!role) throw new ServiceError('岗位配置不存在', 500);
   // 本题（含追问）评分——失败自动降级为规则评分
   q.dimensionScores = await scoreQuestion(role, analysis, q);
