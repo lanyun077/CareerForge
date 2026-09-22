@@ -29,3 +29,8 @@ next-env.d.ts
 
 # smoke test output
 smoke-result.json
+
+# generated PDF parser fixture
+/test-data/sample-compressed.pdf
+
+.idea/

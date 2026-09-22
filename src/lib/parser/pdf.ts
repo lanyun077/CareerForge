@@ -16,6 +16,7 @@ const STANDARD_FONT_DATA_URL = `${path
 export async function extractTextFromPdf(
   buffer: ArrayBuffer,
 ): Promise<{ text: string }> {
+  if (buffer.byteLength < 5) throw new Error('PDF 文件为空或损坏');
   const data = new Uint8Array(buffer);
   const doc = await getDocument({
     data,

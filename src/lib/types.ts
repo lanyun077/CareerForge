@@ -1,6 +1,6 @@
 /**
  * CareerForge 核心数据结构
- * 对应项目方案 5.3：Role / ResumeAnalysis / InterviewSession / ReviewReport
+ * 对应项目方案 5.3：RoleProfile / JobPosting / ResumeAnalysis / InterviewSession / ReviewReport
  */
 
 // ===== 岗位配置 =====
@@ -49,9 +49,15 @@ export interface InterviewStage {
   questionCount: number;
 }
 
-export interface Role {
+/** 稳定的职业方向配置，用于简历初步推荐。 */
+export interface RoleProfile {
+  kind: 'role_profile';
   id: string;
   name: string;
+  /** 职业方向分类，例如 AI/Agent、软件工程、数据、基础设施 */
+  category?: string;
+  /** 搜索和岗位归一化使用的别名 */
+  aliases?: string[];
   description: string;
   /** 是否为模拟岗位 */
   isMock: boolean;
@@ -60,6 +66,70 @@ export interface Role {
   interviewStages: InterviewStage[];
   scoringRubric: ScoringDimension[];
   questionBank: BankQuestion[];
+}
+
+/** 具体企业岗位或用户导入的 JD，用于一次岗位快照和专项训练。 */
+export interface JobPosting {
+  kind: 'job_posting';
+  id: string;
+  name: string;
+  category?: string;
+  aliases?: string[];
+  description: string;
+  isMock: boolean;
+  mockNotice: string;
+  requirements: RoleRequirement;
+  interviewStages: InterviewStage[];
+  scoringRubric: ScoringDimension[];
+  questionBank: BankQuestion[];
+  source: 'user_jd' | 'authorized_api' | 'company_feed' | 'mock';
+  rawDescription: string;
+  sourceUrl?: string;
+  company?: string;
+  location?: string;
+  salary?: string;
+  experienceLevel?: string;
+  publishedAt?: string;
+  fetchedAt: string;
+  expiresAt?: string;
+}
+
+/** 业务服务可处理的职业方向或具体岗位。 */
+export type RoleTarget = RoleProfile | JobPosting;
+
+/** 兼容旧模块的类型名，新的代码应优先使用 RoleTarget。 */
+export type Role = RoleTarget;
+
+export interface RoleRecommendation {
+  role: RoleProfile;
+  score: number;
+  stars: 1 | 2 | 3 | 4 | 5;
+  recommendation: 'high' | 'medium' | 'low';
+  matchedSkills: string[];
+  gaps: string[];
+  evidence: string[];
+  /** 推荐理由，供推荐卡片直接展示。 */
+  reason: string;
+  /** 与技能匹配对应的简历原文证据。 */
+  skillEvidence: { skill: string; quote: string }[];
+  /** 缺口对应的下一步补齐建议。 */
+  gapDetails: { skill: string; why: string; nextStep: string }[];
+}
+
+export interface RecommendationRecord {
+  id: string;
+  resumeText: string;
+  recommendations: RoleRecommendation[];
+  createdAt: string;
+}
+
+export interface RoleSnapshot {
+  id: string;
+  referenceId: string;
+  context: 'recommendation' | 'resume_analysis' | 'interview_session';
+  roleId: string;
+  role: RoleTarget;
+  createdAt: string;
 }
 
 // ===== 简历分析 =====
@@ -96,6 +166,8 @@ export interface ResumeSuggestion {
 export interface ResumeAnalysis {
   id: string;
   roleId: string;
+  /** 分析时的岗位快照，避免岗位配置更新后历史结果失真。 */
+  roleSnapshot?: RoleTarget;
   resumeText: string;
   extractedFields: ExtractedFields;
   /** 岗位匹配分 0-100 */
@@ -148,6 +220,8 @@ export interface InterviewSession {
   id: string;
   roleId: string;
   roleName: string;
+  /** 开始面试时保存的岗位快照。 */
+  roleSnapshot?: RoleTarget;
   resumeAnalysisId: string;
   /** 1 = 首轮训练，2 = 再次挑战 */
   round: number;
@@ -258,4 +332,9 @@ export interface Store {
   listSessions(): Promise<SessionSummary[]>;
   /** 级联删除训练记录（隐私：用户可删除自己的训练数据） */
   deleteRecord(sessionId: string): Promise<boolean>;
+  saveJobPosting(job: JobPosting): Promise<void>;
+  getJobPosting(id: string): Promise<JobPosting | null>;
+  listJobPostings(): Promise<JobPosting[]>;
+  saveRecommendation(record: RecommendationRecord): Promise<void>;
+  saveRoleSnapshot(snapshot: RoleSnapshot): Promise<void>;
 }

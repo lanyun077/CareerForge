@@ -8,7 +8,7 @@ import type {
   ResumeAnalysis,
   ResumeGap,
   ResumeSuggestion,
-  Role,
+  RoleTarget,
 } from '@/lib/types';
 
 // ---------- 基础工具 ----------
@@ -46,7 +46,7 @@ function round1(n: number): number {
 /** 模型输出不完整时用规则结果补齐（混合模式），确保结构完整 */
 export function validateResumeAnalysis(
   raw: unknown,
-  role: Role,
+  role: RoleTarget,
   base: Omit<ResumeAnalysis, 'source' | 'createdAt' | 'id' | 'roleId' | 'resumeText'>,
 ): Omit<ResumeAnalysis, 'source' | 'createdAt' | 'id' | 'roleId' | 'resumeText'> | null {
   const r = asRecord(raw);
@@ -130,7 +130,7 @@ export interface PlanQuestion {
   tags: string[];
 }
 
-export function validatePlanQuestions(raw: unknown, role: Role): PlanQuestion[] | null {
+export function validatePlanQuestions(raw: unknown, role: RoleTarget): PlanQuestion[] | null {
   const r = asRecord(raw);
   if (!r || !Array.isArray(r.questions)) return null;
   const validStages = new Set(role.interviewStages.map((s) => s.id));
@@ -173,7 +173,7 @@ export interface ScoringResult {
 }
 
 /** 必须覆盖岗位评分规则的全部维度；缺失的维度用 null 占位由调用方补齐 */
-export function validateScoring(raw: unknown, role: Role): (Omit<DimensionScore, 'source'> | null)[] | null {
+export function validateScoring(raw: unknown, role: RoleTarget): (Omit<DimensionScore, 'source'> | null)[] | null {
   const r = asRecord(raw);
   if (!r || !Array.isArray(r.dimensions)) return null;
   const byName = new Map<string, Record<string, unknown>>();

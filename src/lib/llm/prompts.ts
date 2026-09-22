@@ -92,3 +92,12 @@ export const REPORT_NARRATIVE_SYSTEM = `你是「AI求职实训教练」的复�
     "recommendedQuestions": ["2-3 个针对薄弱项的练习问题"]
   }
 }`;
+
+export const JOB_PARSE_SYSTEM = `你是招聘信息结构化模块。请从用户提供的招聘描述中提取岗位名称、岗位简介、工作职责、必备技能和加分技能。
+严格要求：只使用原文明确出现的信息，不要编造公司、薪资、技术栈或经验要求；只输出 JSON，不要解释文字。
+格式：{"title":"岗位名称","description":"岗位简介","responsibilities":["职责"],"requiredSkills":["必备技能"],"preferredSkills":["加分技能"]}`;
+
+export const ROLE_MATCH_SYSTEM = `你是岗位匹配分析模块。请根据候选人简历和岗位摘要，为每个岗位给出 0-100 的文本匹配分，并列出有简历证据的匹配点和明确缺口。
+匹配分只表示简历与岗位描述的匹配程度，不代表录取概率；不得根据性别、年龄、地域、学校层次评价候选人。只输出 JSON，不要解释文字。
+每个 matchedSkills 必须有对应 skillEvidence，quote 必须来自简历原文；每个 gaps 必须有 gapDetails，说明缺口原因和下一步补齐动作；reason 用一句话解释推荐依据。
+格式：{"matches":[{"roleId":"岗位ID","score":0,"matchedSkills":["有证据的匹配点"],"gaps":["缺口"],"evidence":["简历原文或概括证据"],"reason":"推荐理由","skillEvidence":[{"skill":"技能","quote":"简历原文片段"}],"gapDetails":[{"skill":"缺口","why":"为什么是缺口","nextStep":"下一步怎么补齐"}]}]}`;

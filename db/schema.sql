@@ -30,6 +30,7 @@ create table if not exists interview_sessions (
   -- 再次挑战所依据的首轮会话
   based_on_session_id uuid references interview_sessions (id) on delete set null,
   focus_weaknesses    jsonb,
+  role_snapshot       jsonb,
   plan                jsonb not null,
   current_plan_index  int not null default 0,
   -- AskedQuestion[]：题目、回答、追问、逐题维度评分
@@ -40,6 +41,8 @@ create table if not exists interview_sessions (
 );
 
 create index if not exists idx_sessions_base on interview_sessions (based_on_session_id);
+
+alter table interview_sessions add column if not exists role_snapshot jsonb;
 
 create table if not exists review_reports (
   id              uuid primary key,
@@ -56,3 +59,43 @@ create table if not exists review_reports (
 );
 
 create unique index if not exists idx_reports_session on review_reports (session_id);
+
+-- 用户粘贴的企业 JD。完整 JobPosting 保存在 payload，结构化列用于列表和过期处理。
+create table if not exists job_postings (
+  id                text primary key,
+  title             text not null,
+  description       text not null default '',
+  raw_description   text not null,
+  source            text not null default 'user_jd',
+  source_url        text,
+  company           text,
+  location          text,
+  salary            text,
+  experience_level  text,
+  published_at      timestamptz,
+  fetched_at        timestamptz not null default now(),
+  expires_at        timestamptz,
+  payload           jsonb not null
+);
+
+create index if not exists idx_job_postings_fetched on job_postings (fetched_at desc);
+
+-- 一次简历推荐结果，保留当时使用的推荐卡片数据，便于后续复盘和指标统计。
+create table if not exists recommendation_runs (
+  id                uuid primary key,
+  resume_text       text not null,
+  recommendations   jsonb not null,
+  created_at        timestamptz not null default now()
+);
+
+-- 岗位快照：推荐、简历分析和面试会话均可引用，避免岗位配置变化影响历史结果。
+create table if not exists role_snapshots (
+  id                uuid primary key,
+  reference_id      text not null,
+  context           text not null,
+  role_id           text not null,
+  payload           jsonb not null,
+  created_at        timestamptz not null default now()
+);
+
+create index if not exists idx_role_snapshots_reference on role_snapshots (reference_id, context);

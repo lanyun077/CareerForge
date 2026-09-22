@@ -11,26 +11,27 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN">
-      <body className="flex min-h-screen flex-col bg-slate-50 text-slate-800">
-        <header className="border-b border-slate-200 bg-white">
-          <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-            <Link href="/" className="text-lg font-bold">
-              CareerForge
-              <span className="ml-2 text-sm font-normal text-slate-500">AI求职实训教练</span>
+      <body className="cf-shell flex min-h-screen flex-col text-slate-800">
+        <header className="border-b border-slate-800 bg-[#172033] text-white">
+          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3.5">
+            <Link href="/" className="flex items-center gap-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#64c7bd] text-sm font-black text-[#172033]">CF</span>
+              <span className="text-base font-bold tracking-tight">CareerForge</span>
+              <span className="hidden border-l border-white/20 pl-3 text-xs text-slate-300 sm:inline">AI 求职实训工作台</span>
             </Link>
-            <nav className="flex gap-4 text-sm">
-              <Link href="/" className="hover:text-blue-600">
+            <nav className="flex items-center gap-1 text-sm text-slate-300">
+              <Link href="/" className="rounded-md px-3 py-1.5 hover:bg-white/10 hover:text-white">
                 首页
               </Link>
-              <Link href="/records" className="hover:text-blue-600">
+              <Link href="/records" className="rounded-md px-3 py-1.5 hover:bg-white/10 hover:text-white">
                 训练记录
               </Link>
             </nav>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-8">{children}</main>
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">{children}</main>
         <footer className="border-t border-slate-200 bg-white">
-          <div className="mx-auto max-w-5xl space-y-1 px-4 py-4 text-xs leading-relaxed text-slate-500">
+          <div className="mx-auto max-w-6xl space-y-1 px-4 py-5 text-xs leading-relaxed text-slate-500">
             <p>
               本系统为求职训练辅助工具，不用于真实招聘决策；内置岗位为模拟岗位，不代表任何真实公司的招聘标准。
             </p>

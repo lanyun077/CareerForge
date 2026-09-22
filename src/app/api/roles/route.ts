@@ -1,6 +1,8 @@
 import { ok } from '@/lib/api';
-import { listRoles } from '@/lib/roles';
+import { listAvailableRoles } from '@/lib/services/roleService';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  return ok(listRoles());
+  return ok(await listAvailableRoles());
 }

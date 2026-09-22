@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Badge, Section } from '@/app/components/Section';
+import { Badge } from '@/app/components/Section';
 import { ScoreBar } from '@/app/components/ScoreBar';
 import type { ReviewReport } from '@/lib/types';
 
@@ -16,228 +16,34 @@ export default function ReportPage() {
 
   useEffect(() => {
     if (!sessionId) return;
-    fetch(`/api/report/${sessionId}`)
-      .then((r) => r.json())
-      .then((b) => {
-        if (b.ok) setReport(b.data as ReviewReport);
-        else setError(b.message ?? '报告生成失败');
-      })
-      .catch(() => setError('网络异常，请刷新重试'));
+    fetch(`/api/report/${sessionId}`).then((r) => r.json()).then((b) => b.ok ? setReport(b.data as ReviewReport) : setError(b.message ?? '报告生成失败')).catch(() => setError('网络异常，请刷新重试'));
   }, [sessionId]);
 
   async function startRound2() {
     if (!report) return;
-    setStarting(true);
+    setStarting(true); setError('');
     try {
-      const res = await fetch('/api/interview/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          roleId: report.roleId,
-          round: 2,
-          basedOnSessionId: report.sessionId,
-        }),
-      });
+      const res = await fetch('/api/interview/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roleId: report.roleId, round: 2, basedOnSessionId: report.sessionId }) });
       const body = await res.json();
-      if (body.ok) {
-        window.location.href = `/interview?sessionId=${body.data.id}`;
-        return;
-      }
+      if (body.ok) { window.location.href = `/interview?sessionId=${body.data.id}`; return; }
       setError(body.message ?? '开始专项挑战失败');
-    } catch {
-      setError('网络异常，请重试');
-    }
-    setStarting(false);
+    } catch { setError('网络异常，请重试'); } finally { setStarting(false); }
   }
 
-  if (error && !report) {
-    return (
-      <div className="space-y-4">
-        <p className="text-sm text-red-600">{error}</p>
-        <Link href="/records" className="text-sm text-blue-600 hover:underline">
-          查看训练记录
-        </Link>
-      </div>
-    );
-  }
-  if (!report) return <p className="text-sm text-slate-500">正在生成复盘报告…</p>;
+  if (error && !report) return <div className="cf-empty"><p className="text-sm text-rose-700">{error}</p><Link href="/records" className="cf-button-secondary mt-4 inline-block px-4 py-2 text-sm">查看训练记录</Link></div>;
+  if (!report) return <div className="cf-loading">正在整理回答证据与复盘报告…</div>;
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h1 className="text-xl font-bold">复盘报告 · 第 {report.round} 轮训练</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {report.roleName}（模拟岗位）· 报告来源：
-            {report.source === 'llm' ? '大模型文案 + 固定公式评分' : '规则模板 + 固定公式评分'}
-          </p>
-        </div>
-        <Badge tone="slate">分数为模拟表现分，非录取概率</Badge>
-      </div>
+  const weakest = report.dimensionScores.slice().sort((a, b) => a.score / a.maxScore - b.score / b.maxScore)[0];
+  const delta = report.comparison ? Math.round((report.comparison.currentOverallScore - report.comparison.baseOverallScore) * 10) / 10 : null;
 
-      <Section title="模拟表现分与岗位准备度">
-        <div className="flex items-center gap-6">
-          <div className="text-5xl font-bold text-blue-600">{report.overallScore}</div>
-          <div className="text-sm text-slate-600">
-            <p className="font-medium text-slate-700">满分 100</p>
-            <p className="mt-1">{report.jobReadiness}</p>
-          </div>
-        </div>
-      </Section>
+  return <div className="space-y-5">
+    <section className="cf-hero-panel"><div className="flex flex-wrap items-start justify-between gap-5"><div><p className="cf-eyebrow text-[#8be0d6]">REVIEW DESK / ROUND {report.round}</p><h1 className="mt-2 text-2xl font-bold tracking-tight text-white md:text-3xl">{report.roleName}</h1><p className="mt-2 text-sm text-slate-300">训练复盘 · {report.source === 'llm' ? 'AI 文案 + 固定公式评分' : '规则模板 + 固定公式评分'}</p></div><Badge tone="green">模拟表现分 · 非录取概率</Badge></div><div className="mt-7 grid gap-5 md:grid-cols-[auto_1fr_auto] md:items-center"><div><p className="text-6xl font-bold leading-none text-[#8be0d6]">{report.overallScore}</p><p className="mt-2 text-xs uppercase tracking-[0.14em] text-slate-400">score / 100</p></div><div className="max-w-xl"><p className="text-sm leading-7 text-slate-200">{report.jobReadiness}</p><div className="mt-4 h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full rounded-full bg-[#64c7bd]" style={{ width: `${report.overallScore}%` }} /></div></div><div className="rounded-lg border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-400">当前最需要关注</p><p className="mt-1 font-semibold text-white">{weakest.name}</p><p className="mt-1 text-xs text-slate-400">{weakest.score} / {weakest.maxScore}</p></div></div></section>
 
-      <Section title="各维度评分" hint="分数由后端固定公式计算；证据来自你的回答原文">
-        <div className="space-y-4">
-          {report.dimensionScores.map((d) => (
-            <div key={d.id} className="rounded border border-slate-200 p-3">
-              <ScoreBar name={d.name} score={d.score} maxScore={d.maxScore} weight={d.weight} />
-              <p className="mt-2 text-xs text-slate-500">证据：{d.evidence}</p>
-              <p className="mt-1 text-xs text-slate-600">建议：{d.suggestion}</p>
-              <div className="mt-1.5">
-                <Badge tone={d.source === 'llm' ? 'blue' : 'slate'}>
-                  {d.source === 'llm' ? '模型评分' : '规则评分'}
-                </Badge>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      <div className="grid gap-6 md:grid-cols-2">
-        <Section title="主要失分原因">
-          <ul className="list-disc space-y-1.5 pl-5 text-sm text-slate-600">
-            {report.mainIssues.map((s, i) => (
-              <li key={i}>{s}</li>
-            ))}
-          </ul>
-        </Section>
-        <Section title="回答证据片段">
-          <ul className="space-y-2 text-sm text-slate-600">
-            {report.evidence.map((s, i) => (
-              <li key={i} className="border-l-2 border-slate-200 pl-3">
-                {s}
-              </li>
-            ))}
-          </ul>
-        </Section>
-      </div>
-
-      <Section title="下一轮训练建议">
-        <ul className="list-decimal space-y-1.5 pl-5 text-sm text-slate-600">
-          {report.nextStepSuggestions.map((s, i) => (
-            <li key={i}>{s}</li>
-          ))}
-        </ul>
-      </Section>
-
-      <Section title="推荐的专项挑战" hint="第二场面试将围绕薄弱维度重新出题，而不是重复同一套题">
-        <div className="space-y-2 text-sm text-slate-600">
-          <p>
-            <span className="font-medium text-slate-700">聚焦维度：</span>
-            {report.nextChallenge.focusAreas.join('、')}
-          </p>
-          <p>{report.nextChallenge.description}</p>
-          {report.nextChallenge.recommendedQuestions.length ? (
-            <ul className="list-disc pl-5">
-              {report.nextChallenge.recommendedQuestions.map((q, i) => (
-                <li key={i}>{q}</li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      </Section>
-
-      {report.comparison ? (
-        <Section title="两次训练对比" hint="与首轮训练的各维度变化">
-          <div className="space-y-4 text-sm">
-            <div className="flex items-center gap-6">
-              <div>
-                <p className="text-xs text-slate-400">首轮模拟表现分</p>
-                <p className="text-2xl font-bold text-slate-600">{report.comparison.baseOverallScore}</p>
-              </div>
-              <div className="text-slate-400">→</div>
-              <div>
-                <p className="text-xs text-slate-400">本轮模拟表现分</p>
-                <p className="text-2xl font-bold text-blue-600">{report.comparison.currentOverallScore}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-400">变化</p>
-                <p
-                  className={`text-2xl font-bold ${
-                    report.comparison.currentOverallScore >= report.comparison.baseOverallScore
-                      ? 'text-green-600'
-                      : 'text-red-600'
-                  }`}
-                >
-                  {report.comparison.currentOverallScore - report.comparison.baseOverallScore >= 0 ? '+' : ''}
-                  {Math.round((report.comparison.currentOverallScore - report.comparison.baseOverallScore) * 10) / 10}
-                </p>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="text-xs text-slate-400">
-                  <tr>
-                    <th className="py-1.5">维度</th>
-                    <th className="py-1.5">首轮</th>
-                    <th className="py-1.5">本轮</th>
-                    <th className="py-1.5">变化</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.comparison.dimensionDeltas.map((d) => (
-                    <tr key={d.name} className="border-t border-slate-100">
-                      <td className="py-1.5 font-medium text-slate-700">{d.name}</td>
-                      <td className="py-1.5 tabular-nums text-slate-500">{d.before}</td>
-                      <td className="py-1.5 tabular-nums text-slate-700">{d.after}</td>
-                      <td
-                        className={`py-1.5 tabular-nums font-medium ${
-                          d.delta > 0 ? 'text-green-600' : d.delta < 0 ? 'text-red-600' : 'text-slate-400'
-                        }`}
-                      >
-                        {d.delta > 0 ? '▲ +' : d.delta < 0 ? '▼ ' : ''}
-                        {d.delta}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {report.comparison.improved.length ? (
-              <p className="text-green-700">已改善：{report.comparison.improved.join('、')}</p>
-            ) : null}
-            {report.comparison.remaining.length ? (
-              <p className="text-amber-700">仍需改进：{report.comparison.remaining.join('、')}</p>
-            ) : null}
-          </div>
-        </Section>
-      ) : null}
-
-      <div className="flex flex-wrap justify-between gap-3">
-        {report.round === 1 ? (
-          <button
-            onClick={startRound2}
-            disabled={starting}
-            className="rounded-md bg-blue-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {starting ? '准备中…' : '开始第二次专项挑战 →'}
-          </button>
-        ) : report.comparison ? (
-          <Link
-            href={`/report/${report.comparison.baseSessionId}`}
-            className="rounded-md border border-slate-300 px-5 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
-          >
-            查看首轮报告
-          </Link>
-        ) : null}
-        <Link
-          href="/records"
-          className="rounded-md border border-slate-300 px-5 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50"
-        >
-          训练记录
-        </Link>
-      </div>
-
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
-    </div>
-  );
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start"><main className="space-y-5"><section className="cf-section p-5 md:p-6"><div className="flex items-end justify-between"><div><p className="cf-eyebrow">DIMENSION SCORECARD</p><h2 className="mt-1 text-base font-semibold text-slate-800">能力维度</h2></div><span className="text-xs text-slate-400">固定权重 · 回答证据</span></div><div className="mt-5 grid gap-3 md:grid-cols-2">{report.dimensionScores.map((d) => <div key={d.id} className="rounded-lg border border-slate-200 bg-slate-50/60 p-4"><ScoreBar name={d.name} score={d.score} maxScore={d.maxScore} weight={d.weight} /><p className="mt-3 text-xs leading-5 text-slate-600"><span className="font-semibold text-slate-700">证据：</span>{d.evidence}</p><p className="mt-2 text-xs leading-5 text-slate-500"><span className="font-semibold text-slate-700">下一步：</span>{d.suggestion}</p><div className="mt-3"><Badge tone={d.source === 'llm' ? 'blue' : 'slate'}>{d.source === 'llm' ? '模型评分' : '规则评分'}</Badge></div></div>)}</div></section>
+      <div className="grid gap-5 md:grid-cols-2"><section className="cf-section p-5"><p className="cf-eyebrow">SIGNALS</p><h2 className="mt-1 text-base font-semibold text-slate-800">主要失分原因</h2><ul className="mt-4 space-y-3">{report.mainIssues.map((s, i) => <li key={i} className="flex gap-3 text-sm leading-6 text-slate-600"><span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-rose-50 text-xs font-semibold text-rose-600">{i + 1}</span><span>{s}</span></li>)}</ul></section><section className="cf-section p-5"><p className="cf-eyebrow">EVIDENCE LOG</p><h2 className="mt-1 text-base font-semibold text-slate-800">回答证据</h2><ul className="mt-4 space-y-3">{report.evidence.map((s, i) => <li key={i} className="border-l-2 border-[#64c7bd] pl-3 text-sm leading-6 text-slate-600">{s}</li>)}</ul></section></div>
+      <section className="cf-section p-5 md:p-6"><p className="cf-eyebrow">NEXT ACTIONS</p><h2 className="mt-1 text-base font-semibold text-slate-800">下一轮训练建议</h2><ol className="mt-4 grid gap-3 md:grid-cols-3">{report.nextStepSuggestions.map((s, i) => <li key={i} className="rounded-lg border border-slate-200 p-4"><span className="text-xs font-bold text-[#2b9b94]">0{i + 1}</span><p className="mt-2 text-sm leading-6 text-slate-600">{s}</p></li>)}</ol></section>
+    </main><aside className="space-y-5 lg:sticky lg:top-5"><section className="rounded-xl border border-[#c8e7e3] bg-[#eef8f7] p-5"><p className="cf-eyebrow">FOCUS CHALLENGE</p><h2 className="mt-1 text-lg font-semibold text-[#124a47]">{report.nextChallenge.focusAreas.join(' · ')}</h2><p className="mt-3 text-sm leading-6 text-slate-600">{report.nextChallenge.description}</p>{report.nextChallenge.recommendedQuestions.length ? <div className="mt-4 space-y-2">{report.nextChallenge.recommendedQuestions.map((q, i) => <div key={i} className="rounded-md bg-white/70 p-2.5 text-xs leading-5 text-slate-600">{q}</div>)}</div> : null}<button onClick={startRound2} disabled={starting || report.round !== 1} className="mt-5 w-full rounded-md bg-[#176b67] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#115854] disabled:cursor-not-allowed disabled:opacity-50">{report.round === 1 ? (starting ? '准备中…' : '开始专项挑战 →') : '已完成第二轮挑战'}</button></section>
+      {report.comparison ? <section className="cf-section p-5"><p className="cf-eyebrow">PROGRESS DELTA</p><h2 className="mt-1 text-base font-semibold text-slate-800">两轮训练变化</h2><div className="mt-4 flex items-end justify-between"><div><p className="text-xs text-slate-400">首轮 → 本轮</p><p className="mt-1 text-2xl font-bold text-slate-700">{report.comparison.baseOverallScore} <span className="text-slate-300">→</span> {report.comparison.currentOverallScore}</p></div><p className={`text-2xl font-bold ${delta !== null && delta >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{delta !== null && delta >= 0 ? '+' : ''}{delta}</p></div><div className="mt-5 space-y-3">{report.comparison.dimensionDeltas.map((d) => <div key={d.name}><div className="mb-1 flex justify-between text-xs"><span className="text-slate-600">{d.name}</span><span className={d.delta >= 0 ? 'text-emerald-600' : 'text-rose-600'}>{d.delta >= 0 ? '+' : ''}{d.delta}</span></div><div className="h-1.5 rounded-full bg-slate-100"><div className={`h-full rounded-full ${d.delta >= 0 ? 'bg-emerald-500' : 'bg-rose-400'}`} style={{ width: `${Math.min(100, Math.max(8, 50 + d.delta * 15))}%` }} /></div></div>)}</div></section> : null}</aside></div>
+    {error ? <p className="text-sm text-rose-700">{error}</p> : null}<div className="flex flex-wrap justify-between gap-3"><Link href="/records" className="cf-button-secondary px-4 py-2.5 text-sm font-medium">返回训练记录</Link>{report.comparison ? <Link href={`/report/${report.comparison.baseSessionId}`} className="cf-button-secondary px-4 py-2.5 text-sm font-medium">查看首轮报告</Link> : null}</div>
+  </div>;
 }
