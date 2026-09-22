@@ -1,186 +1,262 @@
-# CareerForge · AI求职实训教练
+# CareerForge
 
-> 面向计算机专业学生的 AI 求职训练与复盘系统（AI+软件创新赛参赛作品 · MVP 框架 v0.1）
->
-> 核心理念：**不是让 AI 陪聊，也不是简单出题，而是一个可重复的训练闭环。**
+CareerForge 是一个面向计算机专业学生的 AI 求职训练平台。它把简历分析、职业方向推荐、岗位匹配、模拟面试和复盘训练串成一个可重复的闭环：
 
-```text
-岗位要求
-  + 用户简历
-  + 用户回答
-      ↓
-AI组织针对性面试
-      ↓
-基于证据的能力分析
-      ↓
-明确的改进建议
-      ↓
-新的专项挑战
-      ↓
-前后表现对比
-```
+~~~text
+简历 / PDF
+   -> 推荐 3-5 个职业方向
+   -> 搜索方向或导入企业 JD
+   -> 岗位匹配与缺口分析
+   -> 岗位专项模拟面试
+   -> 证据化评分与复盘
+   -> 二次专项挑战与前后对比
+~~~
 
-完整项目方案见 [docs/AI求职实训教练项目方案.md](docs/AI求职实训教练项目方案.md)，
-当前实施进度与后续路线见 [docs/项目完整方案与当前进度.md](docs/项目完整方案与当前进度.md)。
-按阶段执行的任务表见 [docs/任务进度与阶段迭代表.md](docs/任务进度与阶段迭代表.md)。
-交接、启动、测试和后续开发说明见 [docs/项目接手指南.md](docs/项目接手指南.md)。
+项目当前是可运行的 MVP，默认支持无模型的规则兜底模式；配置兼容 OpenAI API 的模型后，可启用千问等模型完成语义分析、出题、追问、评分文案和扫描 PDF OCR。
 
-## 功能概览（MVP）
+## 当前状态
 
-| 模块 | 说明 |
-|---|---|
-| 职业方向推荐 | 根据简历在软件工程、AI/Agent、数据、基础设施和安全等方向中推荐前 3-5 个方向，以匹配度和星级排序 |
-| 岗位选择 | 支持岗位方向搜索、内置方向选择，以及粘贴真实招聘 JD 后导入自定义岗位 |
-| 简历分析 | 粘贴文本或上传文本型 PDF → 结构化输出：匹配分、已具备技能、岗位缺口（要求/现状/问题/建议/证据）、空泛表述、3 条优先级建议 |
-| 模拟面试 | 程序控制的状态机：自我介绍 → 项目经历 → 技术问题 → 场景问题 → 行为问题 → 总结，共 7 题，每题最多追问 1 次 |
-| 针对性追问 | 基于岗位要求、简历项目、当前回答缺口生成；追问必须引用回答或简历原文 |
-| 复盘报告 | 5 维度评分（表达结构 25% / 回答具体性 25% / 岗位相关性 20% / 项目证据 20% / 技术完整度 10%）+ 回答证据 + 主要失分原因 + 训练建议 |
-| 再次挑战 | 根据首轮薄弱维度重新出题（非重复同一套题），第二轮报告自动附带两次训练对比 |
-| 训练记录 | 记录列表 + 删除（隐私要求） |
+- 技术栈：Next.js 14、React 18、TypeScript、Tailwind CSS
+- 开发分支：develop
+- 存储：默认内存；配置 DATABASE_URL 后使用 PostgreSQL / Supabase
+- 模型：OpenAI-compatible chat/completions，推荐使用阿里云百炼兼容接口的千问模型
+- 测试：构建、规则兜底冒烟和 Mock 模型链路均已提供
+- 详细接手说明：[docs/项目接手指南.md](docs/项目接手指南.md)
 
-**不承诺**（方案 2.2）：不预测录取概率、不替代真实面试官、不判断情绪/诚信、不基于性别/年龄/地域/学校评价、报告只使用「模拟表现分 / 岗位准备度」表述。
+## 功能
 
-## 技术栈
+### 求职准备闭环
 
-- **框架**：Next.js 14（App Router）+ TypeScript，前后端一体（Route Handlers 即后端）
-- **样式**：Tailwind CSS
-- **大模型**：OpenAI-compatible API（`chat/completions`），统一封装、JSON 输出校验、失败重试 1 次
-- **PDF 解析**：pdfjs-dist 文本提取 + 可选千问视觉 OCR（扫描件按页识别；OCR 失败自动降级为粘贴文本）
-- **存储**：默认内存（重启清空）；配置 `DATABASE_URL` 即启用 PostgreSQL / Supabase 持久化，连接失败自动降级内存
-- **语音（可选）**：ASR 独立封装（`/api/asr`），未配置时文字输入，不阻塞主流程
+1. 粘贴简历文本，或上传文本型 PDF。
+2. 扫描型 PDF 在没有文字层时尝试调用视觉模型 OCR。
+3. 根据技能、项目证据和模型语义匹配，返回最多 5 个职业方向，并按匹配度和星级排序。
+4. 搜索其他方向，或粘贴真实招聘 JD 导入具体岗位。
+5. 针对选定岗位重新分析已满足项、技能缺口、证据缺口和补齐动作。
+6. 进行岗位专项面试：自我介绍、项目经历、技术题、场景题和行为题；每题最多追问一次。
+7. 生成五维复盘报告，并根据薄弱维度发起第二轮专项挑战。
+8. 在训练记录中查看或删除历史会话。
+
+### 推荐与岗位范围
+
+内置职业方向覆盖软件工程、前端、后端、数据、测试开发、AI/Agent、算法、云原生、网络安全和移动端等方向。系统还支持用户搜索方向以及导入企业 JD。
+
+当前推荐的是可维护的职业方向，不是招聘网站实时职位。实时职位需要后续接入获得授权的招聘 API、企业招聘 Feed 或其他合法数据源，不使用未经许可的全网爬虫。
+
+### 可解释与降级
+
+- 推荐结果展示匹配分、星级、推荐理由、简历技能证据和能力缺口。
+- 评分报告展示维度分、回答证据、失分原因和下一步建议。
+- 模型未配置、调用失败或输出不合规时，自动切换到固定题库、规则追问、规则评分和规则报告，不阻断面试流程。
+- PDF 解析失败时明确提示用户粘贴简历文本；OCR 不可用时也可继续使用文本流程。
+
+项目不预测真实录取概率，不替代真实面试官，不根据性别、年龄、地域或学校层次评价用户。
 
 ## 快速开始
 
-要求：Node.js ≥ 18.17。
+### 环境要求
 
-```bash
+- Node.js >= 18.17
+- npm
+- PostgreSQL / Supabase（可选）
+- 支持 OpenAI-compatible API 的大模型（可选）
+
+### 安装和启动
+
+Windows PowerShell：
+
+~~~powershell
+git clone https://github.com/lanyun077/CareerForge.git
+cd CareerForge
 npm install
-
-# 不配置任何模型也可运行：进入“题库兜底模式”（固定题库 + 规则评分 + 规则追问），
-# 可以完整跑通「简历分析 → 面试 → 复盘 → 二次挑战 → 对比」全流程。
+Copy-Item .env.example .env.local
 npm run dev
-# 打开 http://localhost:3000
-```
+~~~
 
-### 多岗位匹配使用方式
+macOS / Linux：
 
-进入 `/resume` 后粘贴简历，点击“根据简历推荐岗位”。系统会对职业方向进行规则预筛和模型语义匹配，返回 3-5 个带星级的推荐方向；用户可以点击推荐项，也可以用关键词搜索其他方向。若已有真实企业招聘信息，可在“导入真实招聘描述”中粘贴完整 JD，系统会把它解析为本次面试目标。
+~~~bash
+git clone https://github.com/lanyun077/CareerForge.git
+cd CareerForge
+npm install
+cp .env.example .env.local
+npm run dev
+~~~
 
-当前 MVP 推荐的是稳定的职业方向，不承诺实时覆盖所有招聘网站的企业职位。实时职位需要后续接入获得授权的招聘 API 或企业招聘 Feed；不使用未经许可的全网爬虫。
+打开 <http://localhost:3000>。不配置任何模型也可以完整体验“简历分析 → 面试 → 报告 → 二次挑战”的规则兜底流程。
 
-### 配置大模型（可选，推荐）
+## 千问模型配置
 
-复制 `.env.example` 为 `.env.local`，填入任意 OpenAI-compatible 服务：
+不要把真实 API Key 写入 README、源码或 Git。只在本地 .env.local 中配置，并确认该文件已被 .gitignore 忽略。
 
-```bash
-OPENAI_API_KEY=sk-xxx
-OPENAI_BASE_URL=https://api.openai.com/v1   # 或其他兼容服务
-OPENAI_MODEL=gpt-4o-mini
+阿里云百炼兼容接口示例：
 
-# 扫描 PDF OCR（可选，需要支持图片输入的模型，例如 qwen-vl-plus）
+~~~env
+OPENAI_API_KEY=你的千问APIKey
+OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+OPENAI_MODEL=qwen-plus
+
+# 扫描 PDF OCR，模型需要支持图片输入
 OCR_MODEL=qwen-vl-plus
 OCR_API_KEY=
 OCR_BASE_URL=
-```
+~~~
 
-配置后首页会显示「在线模式」，简历分析、出题、追问、评分、复盘文案全部由模型生成；
-未配置或调用失败时自动降级，**面试流程不会因模型异常而中断**（方案 六）。
+OCR 会优先读取 OCR_API_KEY 和 OCR_BASE_URL；为空时复用普通模型配置。若没有配置视觉模型，文本型 PDF 仍可解析，扫描 PDF 会返回可操作的降级提示。
 
-### 测试
+其他 OpenAI-compatible 服务只需替换 OPENAI_BASE_URL 和 OPENAI_MODEL。完整变量模板见 [.env.example](.env.example)。
 
-```bash
-# 1) 内存兜底模式回归（35 项断言，无需任何配置）
-npm run build && npm run start
-npm run smoke
+## PostgreSQL 持久化
 
-# 2) 在线链路验证（不消耗真实 API）：本地 mock 模型服务
-node scripts/mock-llm.mjs 3999 &                    # 正常模式
-OPENAI_API_KEY=mock OPENAI_BASE_URL=http://127.0.0.1:3999/v1 npm run start -- -p 3211
+未配置数据库时，数据保存在当前 Node.js 进程内存中，服务重启后会清空，适合本地开发和演示。配置 DATABASE_URL 后，执行数据库脚本：
+
+~~~bash
+psql "$DATABASE_URL" -f db/schema.sql
+~~~
+
+当前持久化结构包括：
+
+- resume_analyses：简历分析与岗位快照
+- job_postings：用户导入的企业 JD
+- recommendation_runs：一次推荐请求及其结果
+- role_snapshots：推荐、分析和面试使用过的岗位快照
+- interview_sessions：面试状态、问题、回答和岗位快照
+- review_reports：复盘报告与两轮对比
+
+数据库不可用时，系统会记录告警并自动降级到内存存储。访问 GET /api/health 可以查看当前模型模式和存储模式。
+
+## 测试与验证
+
+### 构建和规则兜底冒烟
+
+~~~bash
+npm run build
+npm run start -- -p 3210
+npm run smoke -- http://localhost:3210
+~~~
+
+冒烟测试覆盖简历分析、岗位选择、首轮面试、追问、报告、二次挑战、两轮对比和记录删除，预期为 35 通过，0 失败。
+
+### Mock 模型链路
+
+启动 Mock 模型服务：
+
+~~~bash
+node scripts/mock-llm.mjs 3999
+~~~
+
+在另一个终端启动应用并验证在线链路：
+
+~~~bash
+OPENAI_API_KEY=mock \
+OPENAI_BASE_URL=http://127.0.0.1:3999/v1 \
+npm run start -- -p 3211
+
 npm run smoke:llm -- http://127.0.0.1:3211 --expect llm
+~~~
 
-# 3) 降级链路验证：mock 切垃圾输出模式（--garbage），断言重试后走兜底且流程不中断
-node scripts/mock-llm.mjs 3999 --garbage &
+验证模型返回垃圾内容时是否正确降级：
+
+~~~bash
+node scripts/mock-llm.mjs 3999 --garbage
 npm run smoke:llm -- http://127.0.0.1:3211 --expect fallback
-```
+~~~
 
-测试语料见 [test-data/](test-data/)（10 份不同水平简历 + 30 条分类回答，方案 8.1）。
+提交前建议执行：
 
-### 数据持久化（可选）
+~~~bash
+git diff --check
+git status
+~~~
 
-配置 `DATABASE_URL`（PostgreSQL / Supabase）并在数据库执行 [db/schema.sql](db/schema.sql) 即启用；
-存储层已接口化（`src/lib/store/`），数据库不可用时自动降级内存存储并在日志告警。
+## 项目结构
 
-### 公网部署
-
-见 [docs/部署指南.md](docs/部署指南.md)（Vercel + Supabase，约 30 分钟）。
-
-## 降级与稳定性设计（方案 六）
-
-| 异常场景 | 降级路径 |
-|---|---|
-| 未配置 / 调用失败大模型 | 重试 1 次 → 固定题库出题 + 规则追问 + 规则评分 + 规则报告文案 |
-| PDF 解析失败 | 明确提示「请直接粘贴简历文本」，不阻塞流程 |
-| 模型输出不合规 | 后端校验（字段完整性 / 分数范围 / JSON），按字段用规则结果补齐或整体替换 |
-| 语音转写未配置 / 失败 | 返回明确错误码，前端切换文字输入 |
-| 演示环境无真实用户 | 内置两份「演示案例」简历（明确标注，自制虚构数据） |
-
-## 目录结构
-
-```text
+~~~text
 src/
-├─ app/                    # 页面 + API 路由（前后端一体）
-│  ├─ page.tsx             # 首页：岗位选择、训练闭环、系统状态
-│  ├─ resume/              # 简历输入与分析（粘贴 / PDF）
-│  ├─ interview/           # 模拟面试（对话式）
-│  ├─ report/[sessionId]/  # 复盘报告 + 两轮对比
-│  ├─ records/             # 训练记录（查看 / 删除）
-│  └─ api/                 # roles / health / resume / interview / report / records / asr
-├─ components/             # Section、ScoreBar 等通用组件
+├─ app/
+│  ├─ page.tsx                    首页工作台与系统状态
+│  ├─ resume/page.tsx             简历输入、PDF、岗位推荐和匹配分析
+│  ├─ interview/page.tsx          模拟面试工作区
+│  ├─ report/[sessionId]/page.tsx 复盘报告和二次挑战
+│  ├─ records/page.tsx            训练记录
+│  └─ api/                        Route Handlers 后端接口
 ├─ lib/
-│  ├─ types.ts             # Role / ResumeAnalysis / InterviewSession / ReviewReport（方案 5.3）
-│  ├─ roles/               # 岗位配置（职责、技能、阶段、评分规则、题库）
-│  ├─ llm/                 # client（重试+JSON提取）/ prompts / validate（输出校验）
-│  ├─ services/            # 简历分析 / 面试状态机 / 评分 / 复盘报告 / ASR
-│  ├─ store/               # 训练记录存储（当前：内存；接口化，可换 Supabase/PG）
-│  ├─ parser/              # PDF 文本提取
-│  └─ demo/                # 演示数据（标注为演示案例）
-db/schema.sql              # PostgreSQL / Supabase 表结构（后续接入）
-scripts/smoke.mjs          # 冒烟测试（完整闭环）
-test-data/                 # 内部测试简历与回答（自制虚构数据）
-docs/                      # 完整项目方案
-```
+│  ├─ types.ts                    核心类型：RoleProfile、JobPosting 等
+│  ├─ roles/                      职业方向目录、岗位工厂和搜索
+│  ├─ services/                   推荐、简历、面试、评分、报告和 ASR
+│  ├─ llm/                        模型客户端、提示词和输出校验
+│  ├─ parser/                     PDF 文本提取和视觉 OCR
+│  └─ store/                      内存存储与 PostgreSQL 存储
+├─ scripts/                       冒烟测试和 Mock 模型
+├─ db/schema.sql                  PostgreSQL / Supabase 表结构
+└─ test-data/                     自制虚构测试语料
+~~~
 
-## 关键设计决策
+## 核心设计
 
-1. **程序控制流程，模型只做生成**（方案 6.1）：阶段推进、题数、追问次数、结束条件全部由状态机控制，模型输出先经过结构校验才被采用。
-2. **评分可解释**（方案 4.1）：模型只输出「维度分 + 证据 + 建议」，总分由后端按固定权重公式计算；评分必须引用回答原文作为证据。
-3. **追问不随机**（方案 3.4）：追问必须引用简历或回答内容（用「」标注），规则兜底的追问文本直接内嵌用户回答片段。
-4. **两次训练可对比**（方案 3.6）：第二轮按首轮薄弱维度选题，报告自动生成各维度 delta（▲/▼）。
+### RoleProfile 与 JobPosting
 
-## 与 MVP 验收标准对照（方案 十二）
+- RoleProfile：稳定的职业方向，例如 Python 后端、Agent、数据分析或云原生。
+- JobPosting：具体企业岗位或用户导入的 JD，包含原始描述、来源、公司和岗位要求。
+- RoleTarget：服务层统一接受 RoleProfile | JobPosting，让推荐方向和真实 JD 都能进入同一套分析、面试和报告流程。
 
-| 验收项 | 状态 |
-|---|---|
-| 选择岗位进入训练流程 | ✅ 首页 → 简历 → 面试 |
-| 粘贴文本完成简历分析 | ✅ |
-| 分析结果含岗位缺口与修改建议 | ✅ 结构化缺口卡片 + 3 条优先级建议 |
-| 完成至少 5 个文字面试问题 | ✅ 固定 7 题 |
-| 至少一次追问引用简历/回答 | ✅ 追问文本强制引用（「」标注） |
-| 单次模型失败不中断面试 | ✅ 重试 + 题库/规则兜底 |
-| 报告含维度分数、证据、建议 | ✅ |
-| 按薄弱项生成第二次挑战 | ✅ |
-| 两次训练可比较指标变化 | ✅ 对比表 + 总分变化 |
-| 录音/PDF/模型异常有降级路径 | ✅ 见降级表 |
-| 演示账号完整跑到报告页 | ✅ 首页「用演示简历体验」 |
-| 不展示无依据的录取概率 | ✅ 全站仅用「模拟表现分/岗位准备度」，冒烟测试断言 |
+### 模型与程序的职责边界
 
-## 隐私与合规（方案 十）
+模型负责语义理解、内容生成、证据提取和解释；程序负责硬技能匹配、排序、星级换算、面试状态机、题数限制、总分计算、字段校验、持久化和降级。这样可以避免模型输出不稳定时破坏核心流程。
 
-- 简历与回答为个人信息：内置演示数据均为自制虚构材料；训练数据存内存、重启即清空，且用户可在「训练记录」页删除。
-- 内置岗位为模拟岗位，已在前端与 API 数据中标注，不暗示任何真实公司合作。
-- 报告与评分不基于性别、年龄、地域、学校层次。
-- 本产品定位为求职训练辅助工具，不用于真实招聘决策。
+### 评分维度
 
-## 后续扩展（不影响 MVP）
+| 维度 | 权重 |
+|---|---:|
+| 表达结构 | 25% |
+| 回答具体性 | 25% |
+| 岗位相关性 | 20% |
+| 项目证据 | 20% |
+| 技术完整度 | 10% |
 
-Java/前端/数据分析岗位、多公司与面试官风格、复杂 PDF/Word 解析、语速与填充词分析、TTS 面试官、轻量笔试、长期训练档案、数字人、本地化部署——共同前提是核心评分规则、状态机与训练记录已稳定（方案 十三）。
+总分由后端按固定权重计算，报告中的分数表示模拟训练表现，不代表录取概率。
+
+## 主要接口
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| GET | /api/health | 查看模型、存储和 ASR 状态 |
+| GET | /api/roles | 获取职业方向和已保存岗位 |
+| POST | /api/roles/recommend | 根据简历推荐最多 5 个方向 |
+| POST | /api/roles/import | 将用户 JD 解析并保存为 JobPosting |
+| POST | /api/resume/parse-pdf | 提取 PDF 文本，必要时尝试 OCR |
+| POST | /api/resume/analyze | 分析简历与岗位的匹配度 |
+| POST | /api/interview/start | 开始首轮或二次专项面试 |
+| POST | /api/interview/answer | 提交回答并推进面试状态机 |
+| GET | /api/interview/session/:id | 读取当前面试会话 |
+| GET | /api/report/:sessionId | 生成或读取复盘报告 |
+| GET | /api/records | 获取训练记录 |
+| DELETE | /api/records?id=... | 删除训练记录及关联数据 |
+
+## 已知限制与下一步
+
+- 当前推荐的是职业方向，不是实时招聘平台职位。
+- OCR 已接入视觉模型链路，但复杂多栏、旋转、低清扫描件仍需真实样本回归。
+- 尚未接入 Word/DOCX 简历解析。
+- 未配置数据库时重启会丢失训练记录和用户导入岗位。
+- 当前没有用户登录和数据隔离，不适合直接作为多用户生产系统公开部署。
+- 真实职位搜索、收藏、投递记录、简历版本和职位过期处理仍待实现。
+
+建议迭代顺序：真实职位数据适配器 → 来源/更新时间/过期处理 → 账号与数据隔离 → 简历和岗位版本 → OCR 质量评估 → 生产监控与成本统计。
+
+## 项目文档
+
+- [项目接手指南](docs/项目接手指南.md)：启动、环境变量、接口、测试和协作约定
+- [项目完整方案与当前进度](docs/项目完整方案与当前进度.md)：产品方案、完成度和下一阶段计划
+- [任务进度与阶段迭代表](docs/任务进度与阶段迭代表.md)：按阶段拆分的迭代任务
+- [AI 求职实训教练项目方案](docs/AI求职实训教练项目方案.md)：完整产品设计与验收思路
+- [部署指南](docs/部署指南.md)：Vercel + Supabase 公网部署
+
+## 隐私与安全
+
+- .env.local、API Key、数据库密码和本地日志禁止提交到 Git。
+- 测试简历和回答均为自制虚构数据，不应上传真实个人信息到公共测试环境。
+- 用户可以在训练记录页删除训练数据；正式多用户版本必须增加身份认证和访问控制。
+
+## 许可证
+
+见 [LICENSE](LICENSE)。
