@@ -32,3 +32,5 @@ smoke-result.json
 
 # generated PDF parser fixture
 /test-data/sample-compressed.pdf
+
+.idea/
