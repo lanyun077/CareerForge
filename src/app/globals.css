@@ -158,3 +158,13 @@ a:active {
     text-align: center;
   }
 }
+@media print {
+  body { background: white !important; color: black !important; }
+  body > header, body > footer, .report-print button, .report-print a { display: none !important; }
+  .report-print .lg\:sticky { position: static !important; }
+  .report-print .grid { display: block !important; }
+  .report-print section { break-inside: avoid; margin-bottom: 16px; }
+  .report-print .cf-hero-panel { background: white !important; color: black !important; border: 1px solid #999; }
+  .report-print .cf-hero-panel * { color: black !important; }
+  @page { margin: 15mm; }
+}

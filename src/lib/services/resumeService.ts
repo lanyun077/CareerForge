@@ -35,7 +35,7 @@ export async function analyzeResume(role: RoleTarget, resumeText: string): Promi
         gaps: ruleBase.gaps,
         vagueIssues: ruleBase.vagueIssues,
         suggestions: ruleBase.suggestions,
-      }),
+      }, resumeText),
   });
 
   const analysis: ResumeAnalysis = {
@@ -47,15 +47,14 @@ export async function analyzeResume(role: RoleTarget, resumeText: string): Promi
     source: llmResult ? 'llm' : 'rule',
     createdAt: new Date().toISOString(),
   };
-  await getStore().saveResumeAnalysis(analysis);
-  await getStore().saveRoleSnapshot({
+  await getStore().saveResumeAnalysis(analysis, [{
     id: randomUUID(),
     referenceId: analysis.id,
     context: 'resume_analysis',
     roleId: role.id,
     role,
     createdAt: analysis.createdAt,
-  });
+  }]);
   return analysis;
 }
 

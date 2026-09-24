@@ -21,7 +21,7 @@ AI组织针对性面试
 ```
 
 完整项目方案见 [docs/AI求职实训教练项目方案.md](docs/AI求职实训教练项目方案.md)，
-当前实施进度与后续路线见 [docs/项目完整方案与当前进度.md](docs/项目完整方案与当前进度.md)。
+最新实现、验收与外部阻塞见 [docs/连续开发验收记录.md](docs/连续开发验收记录.md)。
 按阶段执行的任务表见 [docs/任务进度与阶段迭代表.md](docs/任务进度与阶段迭代表.md)。
 交接、启动、测试和后续开发说明见 [docs/项目接手指南.md](docs/项目接手指南.md)。
 
@@ -32,7 +32,7 @@ AI组织针对性面试
 | 职业方向推荐 | 根据简历在软件工程、AI/Agent、数据、基础设施和安全等方向中推荐前 3-5 个方向，以匹配度和星级排序 |
 | 岗位选择 | 支持岗位方向搜索、内置方向选择，以及粘贴真实招聘 JD 后导入自定义岗位 |
 | 简历分析 | 粘贴文本或上传文本型 PDF → 结构化输出：匹配分、已具备技能、岗位缺口（要求/现状/问题/建议/证据）、空泛表述、3 条优先级建议 |
-| 模拟面试 | 程序控制的状态机：自我介绍 → 项目经历 → 技术问题 → 场景问题 → 行为问题 → 总结，共 7 题，每题最多追问 1 次 |
+| 模拟面试 | 程序控制的状态机：自我介绍 → 项目经历 → 技术问题 → 场景问题 → 行为问题 → 总结，主问题可选 5/7/9 题，每题追问上限可选 0/1/2 次，难度可选基础/标准/进阶 |
 | 针对性追问 | 基于岗位要求、简历项目、当前回答缺口生成；追问必须引用回答或简历原文 |
 | 复盘报告 | 5 维度评分（表达结构 25% / 回答具体性 25% / 岗位相关性 20% / 项目证据 20% / 技术完整度 10%）+ 回答证据 + 主要失分原因 + 训练建议 |
 | 再次挑战 | 根据首轮薄弱维度重新出题（非重复同一套题），第二轮报告自动附带两次训练对比 |
@@ -42,19 +42,21 @@ AI组织针对性面试
 
 ## 技术栈
 
-- **框架**：Next.js 14（App Router）+ TypeScript，前后端一体（Route Handlers 即后端）
+- **框架**：Next.js 15.5（App Router）+ TypeScript，前后端一体（Route Handlers 即后端）
 - **样式**：Tailwind CSS
 - **大模型**：OpenAI-compatible API（`chat/completions`），统一封装、JSON 输出校验、失败重试 1 次
 - **PDF 解析**：pdfjs-dist 文本提取 + 可选千问视觉 OCR（扫描件按页识别；OCR 失败自动降级为粘贴文本）
-- **存储**：默认内存（重启清空）；配置 `DATABASE_URL` 即启用 PostgreSQL / Supabase 持久化，连接失败自动降级内存
+- **存储**：未配置数据库时使用内存（重启清空）；配置 `DATABASE_URL` 后固定使用 PostgreSQL，故障返回 503，可恢复后重试
+- **账户**：Supabase 邮箱密码登录；业务 API 与存储均按用户隔离，历史无主数据不自动归属
+- **文档**：PDF 与 DOCX 提取后可编辑；JD 先预览并确认，报告支持浏览器打印
 - **语音（可选）**：ASR 独立封装（`/api/asr`），未配置时文字输入，不阻塞主流程
 
 ## 快速开始
 
-要求：Node.js ≥ 18.17。
+要求：Node.js 22.13+（22.x）或 24+，与锁定的 pdfjs-dist 版本要求一致。
 
 ```bash
-npm install
+npm ci
 
 # 不配置任何模型也可运行：进入“题库兜底模式”（固定题库 + 规则评分 + 规则追问），
 # 可以完整跑通「简历分析 → 面试 → 复盘 → 二次挑战 → 对比」全流程。
@@ -88,6 +90,10 @@ OCR_BASE_URL=
 
 ### 测试
 
+完整本地检查：`npm run build` 后执行 `node scripts/check.mjs`。脚本使用虚构数据、本地模型和认证桩，自动启动并关闭测试服务；包含嵌入式 PostgreSQL SQL 契约测试，不需要真实密钥。端口 3210–3213、3997–3999 应空闲。
+
+生产构建默认要求登录。仅本地手动演示时，在 PowerShell 设置 `$env:AUTH_MODE='local-demo'` 再启动服务。多人部署必须使用 `AUTH_MODE=supabase`，配置 `SUPABASE_URL`、`SUPABASE_ANON_KEY` 与 `DATABASE_URL`，详见最新验收记录。不要将 local-demo 暴露到公网。
+
 ```bash
 # 1) 内存兜底模式回归（35 项断言，无需任何配置）
 npm run build && npm run start
@@ -96,11 +102,11 @@ npm run smoke
 # 2) 在线链路验证（不消耗真实 API）：本地 mock 模型服务
 node scripts/mock-llm.mjs 3999 &                    # 正常模式
 OPENAI_API_KEY=mock OPENAI_BASE_URL=http://127.0.0.1:3999/v1 npm run start -- -p 3211
-npm run smoke:llm -- http://127.0.0.1:3211 --expect llm
+node scripts/smoke-llm.mjs http://127.0.0.1:3211 --expect llm
 
 # 3) 降级链路验证：mock 切垃圾输出模式（--garbage），断言重试后走兜底且流程不中断
 node scripts/mock-llm.mjs 3999 --garbage &
-npm run smoke:llm -- http://127.0.0.1:3211 --expect fallback
+node scripts/smoke-llm.mjs http://127.0.0.1:3211 --expect fallback
 ```
 
 测试语料见 [test-data/](test-data/)（10 份不同水平简历 + 30 条分类回答，方案 8.1）。
@@ -108,7 +114,7 @@ npm run smoke:llm -- http://127.0.0.1:3211 --expect fallback
 ### 数据持久化（可选）
 
 配置 `DATABASE_URL`（PostgreSQL / Supabase）并在数据库执行 [db/schema.sql](db/schema.sql) 即启用；
-存储层已接口化（`src/lib/store/`），数据库不可用时自动降级内存存储并在日志告警。
+数据库不可用时返回可重试错误，不切换存储。升级现有数据库也需重新执行 schema，新增 owner_id 与 RLS；历史无主记录默认不可见。
 
 ### 公网部署
 
@@ -184,3 +190,8 @@ docs/                      # 完整项目方案
 ## 后续扩展（不影响 MVP）
 
 Java/前端/数据分析岗位、多公司与面试官风格、复杂 PDF/Word 解析、语速与填充词分析、TTS 面试官、轻量笔试、长期训练档案、数字人、本地化部署——共同前提是核心评分规则、状态机与训练记录已稳定（方案 十三）。
+
+
+### 真实岗位采集与来源
+
+简历页面可填写来源链接与公司，或采集Greenhouse公开单岗位。采集→预览编辑→确认保存→训练快照→报告均保留来源；修改采集正文或来源后按手动导入记录。仅支持Greenhouse官方公开接口，不是通用爬虫。来源记录不保证岗位仍在招聘或自动提取正确。真实样本与限制见 docs/真实岗位数据验收.md。

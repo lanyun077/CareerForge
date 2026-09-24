@@ -99,3 +99,28 @@ create table if not exists role_snapshots (
 );
 
 create index if not exists idx_role_snapshots_reference on role_snapshots (reference_id, context);
+
+-- 用户归属迁移：NULL 的历史数据保持隔离，禁止自动分配给首个登录用户。
+alter table resume_analyses add column if not exists owner_id text;
+alter table interview_sessions add column if not exists owner_id text;
+alter table review_reports add column if not exists owner_id text;
+alter table job_postings add column if not exists owner_id text;
+alter table recommendation_runs add column if not exists owner_id text;
+alter table role_snapshots add column if not exists owner_id text;
+create index if not exists idx_analyses_owner on resume_analyses (owner_id);
+create index if not exists idx_sessions_owner on interview_sessions (owner_id);
+create index if not exists idx_reports_owner on review_reports (owner_id);
+create index if not exists idx_jobs_owner on job_postings (owner_id);
+create index if not exists idx_recommendations_owner on recommendation_runs (owner_id);
+create index if not exists idx_snapshots_owner on role_snapshots (owner_id);
+
+-- 仅服务器通过 DATABASE_URL 访问；不向 Supabase anon/authenticated REST 角色开放表。
+alter table resume_analyses enable row level security;
+alter table interview_sessions enable row level security;
+alter table review_reports enable row level security;
+alter table job_postings enable row level security;
+alter table recommendation_runs enable row level security;
+alter table role_snapshots enable row level security;
+
+-- 面试配置随会话保存，历史记录使用标准默认配置。
+alter table interview_sessions add column if not exists settings jsonb;

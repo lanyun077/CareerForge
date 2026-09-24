@@ -1,12 +1,14 @@
 /**
  * 面试状态机（方案 3.3 / 3.4 / 6.1）
  *
- * 程序负责控制：当前阶段、问题总数、每题追问次数（≤1）、已问问题、结束条件。
+ * 程序负责控制：当前阶段、问题总数、每题追问次数（配置上限 0/1/2）、已问问题、结束条件。
  * 大模型只在限定范围内生成问题与追问；任何模型调用失败都降级到固定题库 /
  * 规则追问，不允许流程中断。
  */
 
 import { randomUUID } from 'crypto';
+import { sharePending } from './pendingWork';
+import { configureInterviewRole, parseInterviewSettings } from '@/lib/interviewSettings';
 import { ServiceError } from '@/lib/api';
 import { chatJSON } from '@/lib/llm/client';
 import { FOLLOWUP_SYSTEM, INTERVIEW_PLAN_SYSTEM } from '@/lib/llm/prompts';
@@ -28,6 +30,7 @@ import type {
 import { scoreQuestion } from './scoringService';
 
 export interface StartSessionParams {
+  settings?: unknown;
   roleId: string;
   resumeAnalysisId: string;
   round?: number;
@@ -38,6 +41,8 @@ export interface StartSessionParams {
 export async function startSession(params: StartSessionParams): Promise<InterviewSession> {
   const round = params.round === 2 ? 2 : 1;
   let focusWeaknesses: string[] = [];
+  let previousQuestions: string[] = [];
+  let settings = parseInterviewSettings(params.settings);
 
   const store = getStore();
   let analysis = params.resumeAnalysisId
@@ -53,10 +58,17 @@ export async function startSession(params: StartSessionParams): Promise<Intervie
       throw new ServiceError('未找到首轮复盘报告，无法生成专项挑战', 404);
     }
     focusWeaknesses = baseReport.nextChallenge.focusAreas;
+    const baseSession = await store.getSession(params.basedOnSessionId);
+    if (!baseSession || baseSession.round !== 1 || baseSession.status !== 'completed') {
+      throw new ServiceError('专项挑战需要已完成的首轮训练', 409);
+    }
+    if (analysis && analysis.id !== baseSession.resumeAnalysisId) {
+      throw new ServiceError('专项挑战必须使用首轮简历与岗位', 422);
+    }
+    previousQuestions = baseSession.questions.flatMap((q) => [q.text, ...q.followUps.map((fu) => fu.text)]);
+    settings = parseInterviewSettings(baseSession.settings);
     // 再次挑战未显式提供简历分析时，从首轮会话继承
     if (!analysis) {
-      const baseSession = await store.getSession(params.basedOnSessionId);
-      if (!baseSession) throw new ServiceError('首轮训练会话不存在', 404);
       analysis = await store.getResumeAnalysis(baseSession.resumeAnalysisId);
     }
   }
@@ -67,10 +79,13 @@ export async function startSession(params: StartSessionParams): Promise<Intervie
   const role = analysis.roleSnapshot ?? await getTargetRole(analysis.roleId);
   if (!role) throw new ServiceError('岗位配置不存在', 500);
 
-  const plan = await buildPlan(role, analysis, { round, focusWeaknesses });
+  const trainingRole = configureInterviewRole(role, settings);
+  const plan = await buildPlan(trainingRole, analysis, { round, focusWeaknesses, previousQuestions, difficulty: settings.difficulty });
+  if (plan.length !== settings.questionCount) throw new ServiceError('题库不足，请调整题数', 422);
 
   const session: InterviewSession = {
     id: randomUUID(),
+    settings,
     roleId: role.id,
     roleName: role.name,
     roleSnapshot: role,
@@ -84,15 +99,14 @@ export async function startSession(params: StartSessionParams): Promise<Intervie
     status: 'active',
     startedAt: new Date().toISOString(),
   };
-  await store.saveSession(session);
-  await store.saveRoleSnapshot({
+  await store.saveSession(session, [{
     id: randomUUID(),
     referenceId: session.id,
     context: 'interview_session',
     roleId: role.id,
     role,
     createdAt: session.startedAt,
-  });
+  }]);
   return session;
 }
 
@@ -100,14 +114,27 @@ export async function startSession(params: StartSessionParams): Promise<Intervie
 export async function submitAnswer(
   sessionId: string,
   rawAnswer: string,
+  questionId: string,
+): Promise<{ session: InterviewSession; event: 'followUp' | 'question' | 'completed' }> {
+  const answer = rawAnswer.trim().slice(0, 5000);
+  return sharePending(getStore(), JSON.stringify(['answer', sessionId, questionId, answer]), () => processAnswer(sessionId, answer, questionId));
+}
+
+async function processAnswer(
+  sessionId: string,
+  rawAnswer: string,
+  questionId: string,
 ): Promise<{ session: InterviewSession; event: 'followUp' | 'question' | 'completed' }> {
   const store = getStore();
   const session = await store.getSession(sessionId);
   if (!session) throw new ServiceError('训练会话不存在', 404);
-  if (session.status !== 'active') throw new ServiceError('本次训练已结束', 400);
 
   const answer = rawAnswer.trim().slice(0, 5000);
   if (!answer) throw new ServiceError('回答内容不能为空', 422);
+
+  const replay = replayAnswer(session, questionId, answer);
+  if (replay) return replay;
+  const previousQuestions = structuredClone(session.questions);
 
   const analysis = await store.getResumeAnalysis(session.resumeAnalysisId);
   const q = session.questions[session.questions.length - 1];
@@ -116,14 +143,13 @@ export async function submitAnswer(
   let event: 'followUp' | 'question' | 'completed';
 
   if (q.answer === undefined) {
-    // 首次回答本题：判断是否追问（每题最多 1 次）
+    // 首次回答本题：判断是否追问（按会话配置限制次数）
     q.answer = answer;
-    if (q.followUps.length === 0) {
+    if ((session.settings?.maxFollowUps ?? 1) > 0 && q.followUps.length === 0) {
       const fu = await buildFollowUp(session, analysis, q, answer);
       if (fu) {
         q.followUps.push(fu);
-        await store.saveSession(session);
-        return { session, event: 'followUp' };
+        return persist('followUp');
       }
     }
     event = await advance(session, analysis, q);
@@ -132,11 +158,43 @@ export async function submitAnswer(
     const fu = q.followUps[q.followUps.length - 1];
     if (!fu || fu.answer !== undefined) throw new ServiceError('会话状态异常', 500);
     fu.answer = answer;
+    if (q.followUps.length < (session.settings?.maxFollowUps ?? 1)) {
+      const next = await buildFollowUp(session, analysis, q, answer);
+      if (next && !q.followUps.some((previous) => normalizeQuestion(previous.text) === normalizeQuestion(next.text))) {
+        q.followUps.push(next);
+        return persist('followUp');
+      }
+    }
     event = await advance(session, analysis, q);
   }
 
-  await store.saveSession(session);
-  return { session, event };
+  return persist(event);
+
+  async function persist(event: 'followUp' | 'question' | 'completed') {
+    if (await store.updateSession(session!, previousQuestions)) return { session: session!, event };
+    const current = await store.getSession(sessionId);
+    if (!current) throw new ServiceError('训练会话已删除，无法保存回答', 404);
+    const replay = replayAnswer(current, questionId, answer);
+    if (replay) return replay;
+    throw new ServiceError('训练状态已更新，请刷新当前问题后重试', 409);
+  }
+}
+
+/** 已接收的同一回答可以安全重试；不同的旧回答不能落到下一题。 */
+function replayAnswer(session: InterviewSession, questionId: string, answer: string):
+  { session: InterviewSession; event: 'followUp' | 'question' | 'completed' } | null {
+  const target = session.questions.flatMap((q) => [q, ...q.followUps]).find((q) => q.id === questionId);
+  if (target?.answer !== undefined) {
+    if (target.answer !== answer) throw new ServiceError('该问题已有回答，请刷新查看最新训练状态；输入已保留', 409);
+    const last = session.questions[session.questions.length - 1];
+    return { session, event: session.status === 'completed' ? 'completed' : last.answer === undefined ? 'question' : 'followUp' };
+  }
+  const last = session.questions[session.questions.length - 1];
+  const pending = last?.answer === undefined ? last : last.followUps.find((fu) => fu.answer === undefined);
+  if (session.status !== 'active' || !pending || pending.id !== questionId) {
+    throw new ServiceError('当前问题已变化或训练已结束，请刷新查看最新状态；输入已保留', 409);
+  }
+  return null;
 }
 
 // ---------- 计划生成 ----------
@@ -153,14 +211,14 @@ export const DIM_TAGS: Record<string, string[]> = {
 async function buildPlan(
   role: RoleTarget,
   analysis: ResumeAnalysis,
-  opts: { round: number; focusWeaknesses: string[] },
+  opts: { round: number; focusWeaknesses: string[]; previousQuestions: string[]; difficulty?: string },
 ): Promise<StagePlanItem[]> {
   const bankPlan = selectFromBank(role, opts);
 
   // 大模型个性化出题（失败 / 未配置时直接用题库）
   const llmQuestions = await chatJSON<PlanQuestion[]>({
     system: INTERVIEW_PLAN_SYSTEM,
-    user: buildPlanUserPrompt(role, analysis, opts, bankPlan.map((b) => b.text)),
+    user: buildPlanUserPrompt(role, analysis, opts, [...opts.previousQuestions, ...bankPlan.map((b) => b.text)]),
     temperature: 0.5,
     timeoutMs: 20_000,
     validate: (raw) => validatePlanQuestions(raw, role),
@@ -174,11 +232,13 @@ async function buildPlan(
     llmByStage.set(lq.stageId, arr);
   }
 
+  const used = new Set(opts.previousQuestions.map(normalizeQuestion));
   return bankPlan.map((slot) => {
     const candidate = llmByStage.get(slot.stageId)?.shift();
     const dupOfBank = candidate && bankPlan.some((b) => b.text === candidate.text);
     const nearDup = candidate && candidate.text.slice(0, 15) === slot.text.slice(0, 15);
-    if (candidate && !dupOfBank && !nearDup) {
+    if (candidate && !dupOfBank && !nearDup && !used.has(normalizeQuestion(candidate.text))) {
+      used.add(normalizeQuestion(candidate.text));
       return {
         stageId: slot.stageId,
         stageName: slot.stageName,
@@ -187,14 +247,15 @@ async function buildPlan(
         tags: candidate.tags,
       };
     }
+    used.add(normalizeQuestion(slot.text));
     return slot;
   });
 }
 
 /** 从固定题库选题（兜底通道；第二轮按薄弱维度标签过滤） */
-function selectFromBank(
+export function selectFromBank(
   role: RoleTarget,
-  opts: { round: number; focusWeaknesses: string[] },
+  opts: { round: number; focusWeaknesses: string[]; previousQuestions: string[]; difficulty?: string },
 ): StagePlanItem[] {
   const dimIds = new Set<string>();
   for (const name of opts.focusWeaknesses) {
@@ -204,23 +265,29 @@ function selectFromBank(
   const focusTags = [...dimIds].flatMap((id) => DIM_TAGS[id] ?? []);
 
   const plan: StagePlanItem[] = [];
+  const previous = new Set(opts.previousQuestions.map(normalizeQuestion));
   for (const stage of role.interviewStages) {
-    let pool = role.questionBank.filter((q) => q.stage === stage.id);
-    if (opts.round === 2 && focusTags.length) {
-      const filtered = pool.filter((q) => q.tags.some((t) => focusTags.includes(t)));
-      if (filtered.length) pool = filtered;
-    }
-    for (const q of shuffle(pool).slice(0, stage.questionCount)) {
+    const pool = shuffle(role.questionBank.filter((q) => q.stage === stage.id));
+    const priority = (q: typeof pool[number]) =>
+      (previous.has(normalizeQuestion(q.text)) ? 2 : 0) +
+      (q.tags.some((t) => focusTags.includes(t)) ? 0 : 1);
+    if (opts.round === 2) pool.sort((a, b) => priority(a) - priority(b));
+    const unique = pool.filter((q, i) => pool.findIndex((other) => normalizeQuestion(other.text) === normalizeQuestion(q.text)) === i);
+    for (const q of unique.slice(0, stage.questionCount)) {
       plan.push({ stageId: stage.id, stageName: stage.name, text: q.text, source: 'bank', tags: q.tags });
     }
   }
   return plan;
 }
 
+function normalizeQuestion(text: string): string {
+  return text.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+}
+
 function buildPlanUserPrompt(
   role: RoleTarget,
   analysis: ResumeAnalysis,
-  opts: { round: number; focusWeaknesses: string[] },
+  opts: { round: number; focusWeaknesses: string[]; difficulty?: string },
   bankTexts: string[],
 ): string {
   const stages = role.interviewStages
@@ -230,6 +297,7 @@ function buildPlanUserPrompt(
     .map((p) => `项目「${p.name}」：${p.description.slice(0, 80)}`)
     .join('\n');
   return [
+    `【训练要求】${opts.difficulty === 'advanced' ? '要求比较方案、边界、失败场景和验证方法' : opts.difficulty === 'basic' ? '以基本概念和简单实例为主' : '标准岗位实践问题'}`,
     `【面试阶段计划】\n${stages}`,
     `【岗位】${role.name}\n必备技能：${role.requirements.requiredSkills.map((s) => s.label).join('、')}`,
     `【简历关键信息】\n${projects || analysis.resumeText.slice(0, 800)}`,
@@ -257,13 +325,16 @@ async function buildFollowUp(
   const role = analysis?.roleSnapshot ?? session.roleSnapshot ?? await getTargetRole(session.roleId);
   if (!role) return null;
 
-  const asked = session.questions.map((x) => x.text);
+  const asked = session.questions.flatMap((x) => [x.text, ...x.followUps.map((fu) => fu.text)]);
   const llm = await chatJSON<{ needed: boolean; text: string; reason: string }>({
     system: FOLLOWUP_SYSTEM,
     user: buildFollowUpUserPrompt(role, analysis, q, answer, asked),
     temperature: 0.4,
     timeoutMs: 20_000,
-    validate: validateFollowUp,
+    validate: (raw) => validateFollowUp(raw, [
+      { id: q.id, text: answer },
+      { id: analysis?.id ?? 'resume', text: analysis?.resumeText ?? '' },
+    ]),
   });
   if (llm) {
     if (!llm.needed) return null;

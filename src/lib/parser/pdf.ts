@@ -15,17 +15,24 @@ const STANDARD_FONT_DATA_URL = `${path
 
 export async function extractTextFromPdf(
   buffer: ArrayBuffer,
+  signal?: AbortSignal,
 ): Promise<{ text: string }> {
   if (buffer.byteLength < 5) throw new Error('PDF 文件为空或损坏');
-  const data = new Uint8Array(buffer);
-  const doc = await getDocument({
+  const data = new Uint8Array(buffer.slice(0));
+  const task = getDocument({
     data,
     useSystemFonts: true,
     isEvalSupported: false,
     standardFontDataUrl: STANDARD_FONT_DATA_URL,
-  }).promise;
+  });
+  const cancel = () => { void task.destroy().catch(() => undefined); };
+  signal?.throwIfAborted();
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+  const doc = await task.promise;
   const pages: string[] = [];
   for (let i = 1; i <= doc.numPages; i++) {
+    signal?.throwIfAborted();
     const page = await doc.getPage(i);
     const content = await page.getTextContent();
     const strings = content.items
@@ -36,4 +43,8 @@ export async function extractTextFromPdf(
   const text = pages.join('\n').replace(/[  ]+/g, ' ').replace(/\u0000/g, '').trim();
   if (!text) throw new Error('PDF 中未提取到文本（可能是纯扫描件图片）');
   return { text };
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+    await task.destroy();
+  }
 }

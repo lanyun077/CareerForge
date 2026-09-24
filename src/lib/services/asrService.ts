@@ -6,6 +6,8 @@
  * 转写失败同样降级为文字输入，不阻塞主流程。
  */
 
+import { ServiceError } from '@/lib/api';
+
 export class AsrNotConfiguredError extends Error {
   constructor() {
     super('语音转写为可选能力：请配置 ASR_API_KEY 后启用，当前请使用文字输入。');
@@ -34,6 +36,8 @@ function getAsrConfig(): AsrConfig | null {
 
 /** 转写音频文件为文字（OpenAI-compatible /audio/transcriptions） */
 export async function transcribeAudio(file: File): Promise<string> {
+  if (!file.size || file.size > 10 * 1024 * 1024) throw new ServiceError('录音不能为空且不能超过 10 MB', 413);
+  if (!['audio/webm', 'audio/mp4', 'audio/ogg', 'audio/wav', 'audio/x-wav', 'audio/mpeg'].includes(file.type.split(';')[0])) throw new ServiceError('不支持的音频格式', 415);
   const cfg = getAsrConfig();
   if (!cfg) throw new AsrNotConfiguredError();
 
@@ -51,5 +55,6 @@ export async function transcribeAudio(file: File): Promise<string> {
     throw new Error('语音转写失败，请改用文字输入');
   }
   const data = (await res.json()) as { text?: string };
-  return (data.text ?? '').trim();
+  if (typeof data.text !== 'string' || data.text.length > 5000) throw new ServiceError('转写内容无效或超过 5000 字，请缩短录音', 422);
+  return data.text.trim();
 }

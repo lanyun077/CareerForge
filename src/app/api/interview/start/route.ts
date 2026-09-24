@@ -1,8 +1,9 @@
+import { withUser } from '@/lib/auth';
 import { fail, ok, ServiceError } from '@/lib/api';
 import { startSession, type StartSessionParams } from '@/lib/services/interviewService';
 
 /** 开始一次训练（round=2 时为基于首轮报告的再次挑战，简历分析可从首轮继承） */
-export async function POST(req: Request) {
+async function handlePOST(req: Request) {
   try {
     const body = (await req.json()) as Partial<StartSessionParams>;
     const round = body.round === 2 ? 2 : 1;
@@ -13,6 +14,7 @@ export async function POST(req: Request) {
       resumeAnalysisId: body.resumeAnalysisId ?? '',
       round,
       basedOnSessionId: body.basedOnSessionId,
+      settings: body.settings,
     });
     return ok(session);
   } catch (err) {
@@ -21,3 +23,5 @@ export async function POST(req: Request) {
     return fail('开始训练失败，请重试', 500);
   }
 }
+
+export const POST = withUser(handlePOST);

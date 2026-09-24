@@ -4,10 +4,12 @@
  * 设计：
  * - 结构化关键列（id / 状态 / 轮次 / 分数）用于查询；完整对象存 JSONB payload，
  *   避免首版为嵌套结构过度建模。
- * - 任何查询异常由 StoreFacade 捕获并降级内存存储（见 memoryStore.ts）。
+ * - 查询异常由 StoreFacade 返回可重试错误，不迁移或静默切换数据。
  */
 
 import { Pool } from 'pg';
+import { ServiceError } from '@/lib/api';
+const pools = new Map<string, Pool>();
 import type {
   InterviewSession,
   ResumeAnalysis,
@@ -19,6 +21,7 @@ import type {
   RoleSnapshot,
 } from '@/lib/types';
 interface PgSessionRow {
+  settings: InterviewSession['settings'] | null;
   id: string;
   role_id: string;
   role_name: string;
@@ -38,6 +41,7 @@ interface PgSessionRow {
 function rowToSession(row: PgSessionRow): InterviewSession {
   return {
     id: row.id,
+    settings: row.settings ?? undefined,
     roleId: row.role_id,
     roleName: row.role_name,
     resumeAnalysisId: row.resume_analysis_id,
@@ -59,44 +63,45 @@ export class PostgresStore implements Store {
 
   private pool: Pool;
 
-  constructor(databaseUrl: string) {
-    this.pool = new Pool({
+  constructor(databaseUrl: string, private readonly owner: string) {
+    this.pool = pools.get(databaseUrl) ?? new Pool({
       connectionString: databaseUrl,
       max: 5,
       connectionTimeoutMillis: 5_000,
     });
+    pools.set(databaseUrl, this.pool);
   }
 
-  async saveResumeAnalysis(a: ResumeAnalysis): Promise<void> {
-    await this.pool.query(
-      `insert into resume_analyses (id, role_id, resume_text, matching_score, payload, source, created_at)
-       values ($1, $2, $3, $4, $5::jsonb, $6, $7)
+  async saveResumeAnalysis(a: ResumeAnalysis, snapshots: RoleSnapshot[] = []): Promise<void> {
+    await this.withSnapshots(snapshots, async (client) => { await client.query(
+      `insert into resume_analyses (id, role_id, resume_text, matching_score, payload, source, created_at, owner_id)
+       values ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
        on conflict (id) do update
          set matching_score = excluded.matching_score,
              payload = excluded.payload,
-             source = excluded.source`,
-      [a.id, a.roleId, a.resumeText, a.matchingScore, JSON.stringify(a), a.source, a.createdAt],
-    );
+             source = excluded.source where resume_analyses.owner_id = $8`,
+      [a.id, a.roleId, a.resumeText, a.matchingScore, JSON.stringify(a), a.source, a.createdAt, this.owner],
+    ); });
   }
 
   async getResumeAnalysis(id: string): Promise<ResumeAnalysis | null> {
-    const r = await this.pool.query('select payload from resume_analyses where id = $1', [id]);
+    const r = await this.pool.query('select payload from resume_analyses where id = $1 and owner_id = $2', [id, this.owner]);
     return (r.rows[0]?.payload as ResumeAnalysis | undefined) ?? null;
   }
 
-  async saveSession(s: InterviewSession): Promise<void> {
-    await this.pool.query(
+  async saveSession(s: InterviewSession, snapshots: RoleSnapshot[] = []): Promise<void> {
+    await this.withSnapshots(snapshots, async (client) => { await client.query(
       `insert into interview_sessions
          (id, role_id, role_name, resume_analysis_id, round, based_on_session_id,
-         focus_weaknesses, role_snapshot, plan, current_plan_index, questions, status, started_at, finished_at)
-       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11::jsonb, $12, $13, $14)
+         focus_weaknesses, role_snapshot, plan, current_plan_index, questions, status, started_at, finished_at, owner_id, settings)
+       values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10, $11::jsonb, $12, $13, $14, $15, $16::jsonb)
        on conflict (id) do update
          set current_plan_index = excluded.current_plan_index,
              questions = excluded.questions,
              status = excluded.status,
              finished_at = excluded.finished_at,
              focus_weaknesses = excluded.focus_weaknesses,
-             role_snapshot = excluded.role_snapshot`,
+             role_snapshot = excluded.role_snapshot where interview_sessions.owner_id = $15`,
       [
         s.id,
         s.roleId,
@@ -112,26 +117,51 @@ export class PostgresStore implements Store {
         s.status,
         s.startedAt,
         s.finishedAt ?? null,
+        this.owner,
+        JSON.stringify(s.settings ?? null),
       ],
-    );
+    ); });
   }
 
   async getSession(id: string): Promise<InterviewSession | null> {
-    const r = await this.pool.query('select * from interview_sessions where id = $1', [id]);
+    const r = await this.pool.query('select * from interview_sessions where id = $1 and owner_id = $2', [id, this.owner]);
     return r.rows[0] ? rowToSession(r.rows[0] as unknown as PgSessionRow) : null;
   }
 
+  async updateSession(s: InterviewSession, previousQuestions: InterviewSession['questions']): Promise<boolean> {
+    const result = await this.pool.query(
+      `update interview_sessions
+       set current_plan_index = $2, questions = $3::jsonb, status = $4, finished_at = $5
+       where id = $1 and status = 'active' and questions = $6::jsonb and owner_id = $7`,
+      [s.id, s.currentPlanIndex, JSON.stringify(s.questions), s.status, s.finishedAt ?? null, JSON.stringify(previousQuestions), this.owner],
+    );
+    return result.rowCount === 1;
+  }
+
   async saveReport(rep: ReviewReport): Promise<void> {
-    await this.pool.query(
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      // 锁住会话直到报告落库，使删除与延迟返回的模型结果按事务顺序生效。
+      const sessions = await client.query(
+        'select id, based_on_session_id from interview_sessions where owner_id = $1 and id = any($2::uuid[]) order by id for update',
+        [this.owner, [rep.sessionId, ...(rep.comparison ? [rep.comparison.baseSessionId] : [])]],
+      );
+      const session = sessions.rows.find((row) => row.id === rep.sessionId);
+      if (!session) throw new ServiceError('训练会话不存在', 404);
+      if (rep.comparison && (session.based_on_session_id !== rep.comparison.baseSessionId || !sessions.rows.some((row) => row.id === rep.comparison!.baseSessionId))) {
+        rep = { ...rep, comparison: undefined };
+      }
+      await client.query(
       `insert into review_reports
-         (id, session_id, role_id, round, overall_score, dimension_scores, comparison, payload, source, created_at)
-       values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10)
+         (id, session_id, role_id, round, overall_score, dimension_scores, comparison, payload, source, created_at, owner_id)
+       values ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9, $10, $11)
        on conflict (session_id) do update
          set overall_score = excluded.overall_score,
              dimension_scores = excluded.dimension_scores,
              comparison = excluded.comparison,
              payload = excluded.payload,
-             source = excluded.source`,
+             source = excluded.source where review_reports.owner_id = $11`,
       [
         rep.id,
         rep.sessionId,
@@ -143,12 +173,16 @@ export class PostgresStore implements Store {
         JSON.stringify(rep),
         rep.source,
         rep.createdAt,
+        this.owner,
       ],
-    );
+      );
+      await client.query('commit');
+    } catch (error) { await client.query('rollback'); throw error; }
+    finally { client.release(); }
   }
 
   async getReportBySession(sessionId: string): Promise<ReviewReport | null> {
-    const r = await this.pool.query('select payload from review_reports where session_id = $1', [sessionId]);
+    const r = await this.pool.query('select payload from review_reports where session_id = $1 and owner_id = $2', [sessionId, this.owner]);
     return (r.rows[0]?.payload as ReviewReport | undefined) ?? null;
   }
 
@@ -158,8 +192,9 @@ export class PostgresStore implements Store {
               jsonb_array_length(s.plan) as question_count,
               rep.payload->>'overallScore' as overall_score
        from interview_sessions s
-       left join review_reports rep on rep.session_id = s.id
-       order by s.started_at desc`,
+       left join review_reports rep on rep.session_id = s.id and rep.owner_id = s.owner_id
+       where s.owner_id = $1 order by s.started_at desc`,
+      [this.owner],
     );
     return r.rows.map(
       (row: { id: string; role_id: string; role_name: string; round: number; status: string; started_at: Date; finished_at: Date | null; question_count: number; overall_score: string | null }) => ({
@@ -177,37 +212,33 @@ export class PostgresStore implements Store {
   }
 
   async deleteRecord(sessionId: string): Promise<boolean> {
-    const exist = await this.pool.query('select 1 from interview_sessions where id = $1', [sessionId]);
-    if (!exist.rowCount) return false;
-    // 报告经外键级联删除
-    const del = await this.pool.query(
-      'delete from interview_sessions where id = $1 returning resume_analysis_id',
-      [sessionId],
-    );
-    const analysisId: string | undefined = del.rows[0]?.resume_analysis_id;
-    if (analysisId) {
-      // 没有其他会话引用时，一并删除简历分析（隐私：彻底删除）
-      await this.pool.query(
-        `delete from resume_analyses a
-         where a.id = $1
-           and not exists (select 1 from interview_sessions s where s.resume_analysis_id = a.id)`,
-        [analysisId],
-      );
-    }
-    return true;
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      const del = await client.query('delete from interview_sessions where id = $1 and owner_id = $2 returning resume_analysis_id', [sessionId, this.owner]);
+      if (!del.rowCount) { await client.query('rollback'); return false; }
+      await client.query("delete from role_snapshots where owner_id = $2 and context = 'interview_session' and reference_id = $1", [sessionId, this.owner]);
+      await client.query("update review_reports set comparison = null, payload = payload - 'comparison' where owner_id = $2 and payload->'comparison'->>'baseSessionId' = $1", [sessionId, this.owner]);
+      const removed = await client.query(`delete from resume_analyses a where id = $1 and owner_id = $2
+        and not exists (select 1 from interview_sessions s where s.resume_analysis_id = a.id) returning id`, [del.rows[0].resume_analysis_id, this.owner]);
+      if (removed.rowCount) await client.query("delete from role_snapshots where owner_id = $2 and context = 'resume_analysis' and reference_id = $1", [String(removed.rows[0].id), this.owner]);
+      await client.query('commit');
+      return true;
+    } catch (error) { await client.query('rollback'); throw error; }
+    finally { client.release(); }
   }
 
   async saveJobPosting(job: JobPosting): Promise<void> {
     await this.pool.query(
       `insert into job_postings
          (id, title, description, raw_description, source, source_url, company, location,
-          salary, experience_level, published_at, fetched_at, expires_at, payload)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb)
+          salary, experience_level, published_at, fetched_at, expires_at, payload, owner_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15)
        on conflict (id) do update set
          title = excluded.title,
          description = excluded.description,
          raw_description = excluded.raw_description,
-         payload = excluded.payload`,
+         payload = excluded.payload where job_postings.owner_id = $15`,
       [
         job.id,
         job.name,
@@ -223,33 +254,62 @@ export class PostgresStore implements Store {
         job.fetchedAt,
         job.expiresAt ?? null,
         JSON.stringify(job),
+        this.owner,
       ],
     );
   }
 
   async getJobPosting(id: string): Promise<JobPosting | null> {
-    const r = await this.pool.query('select payload from job_postings where id = $1', [id]);
+    const r = await this.pool.query('select payload from job_postings where id = $1 and owner_id = $2', [id, this.owner]);
     return (r.rows[0]?.payload as JobPosting | undefined) ?? null;
   }
 
   async listJobPostings(): Promise<JobPosting[]> {
-    const r = await this.pool.query('select payload from job_postings order by fetched_at desc');
+    const r = await this.pool.query('select payload from job_postings where owner_id = $1 order by fetched_at desc', [this.owner]);
     return r.rows.map((row: { payload: JobPosting }) => row.payload);
   }
 
-  async saveRecommendation(record: RecommendationRecord): Promise<void> {
-    await this.pool.query(
-      `insert into recommendation_runs (id, resume_text, recommendations, created_at)
-       values ($1, $2, $3::jsonb, $4)`,
-      [record.id, record.resumeText, JSON.stringify(record.recommendations), record.createdAt],
-    );
+  async saveRecommendation(record: RecommendationRecord, snapshots: RoleSnapshot[] = []): Promise<void> {
+    await this.withSnapshots(snapshots, async (client) => { await client.query(
+      `insert into recommendation_runs (id, resume_text, recommendations, created_at, owner_id)
+       values ($1, $2, $3::jsonb, $4, $5)`,
+      [record.id, record.resumeText, JSON.stringify(record.recommendations), record.createdAt, this.owner],
+    ); });
+  }
+
+  async listRecommendations(): Promise<RecommendationRecord[]> {
+    const result = await this.pool.query('select id, resume_text, recommendations, created_at from recommendation_runs where owner_id = $1 order by created_at desc', [this.owner]);
+    return result.rows.map((row) => ({ id: row.id, resumeText: row.resume_text, recommendations: row.recommendations, createdAt: new Date(row.created_at).toISOString() }));
+  }
+
+  async clearRecommendations(): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      await client.query('delete from recommendation_runs where owner_id = $1', [this.owner]);
+      await client.query("delete from role_snapshots where owner_id = $1 and context = 'recommendation'", [this.owner]);
+      await client.query('commit');
+    } catch (error) { await client.query('rollback'); throw error; }
+    finally { client.release(); }
   }
 
   async saveRoleSnapshot(snapshot: RoleSnapshot): Promise<void> {
-    await this.pool.query(
-      `insert into role_snapshots (id, reference_id, context, role_id, payload, created_at)
-       values ($1, $2, $3, $4, $5::jsonb, $6)`,
-      [snapshot.id, snapshot.referenceId, snapshot.context, snapshot.roleId, JSON.stringify(snapshot.role), snapshot.createdAt],
-    );
+    return this.withSnapshots([snapshot], async () => undefined);
+  }
+
+  private async withSnapshots(snapshots: RoleSnapshot[], write: (client: Pick<Pool, 'query'>) => Promise<void>): Promise<void> {
+    if (!snapshots.length) return write(this.pool);
+    const client = await this.pool.connect();
+    try {
+      await client.query('begin');
+      await write(client);
+      for (const snapshot of snapshots) await client.query(
+        `insert into role_snapshots (id, reference_id, context, role_id, payload, created_at, owner_id)
+         values ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
+        [snapshot.id, snapshot.referenceId, snapshot.context, snapshot.roleId, JSON.stringify(snapshot.role), snapshot.createdAt, this.owner],
+      );
+      await client.query('commit');
+    } catch (error) { await client.query('rollback'); throw error; }
+    finally { client.release(); }
   }
 }

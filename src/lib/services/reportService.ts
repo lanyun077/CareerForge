@@ -7,6 +7,8 @@
  */
 
 import { randomUUID } from 'crypto';
+import { configureInterviewRole, parseInterviewSettings } from '@/lib/interviewSettings';
+import { sharePending } from './pendingWork';
 import { ServiceError } from '@/lib/api';
 import { chatJSON } from '@/lib/llm/client';
 import { REPORT_NARRATIVE_SYSTEM } from '@/lib/llm/prompts';
@@ -27,13 +29,17 @@ import { computeOverall } from './scoringService';
 const DIM_ADVICE: Record<string, string> = {
   structure: '用 STAR（背景-任务-行动-结果）重写每段项目描述，回答时先给结论再展开',
   specificity: '每个项目准备 2-3 个量化结果（数据量、性能变化、用户规模），并说明测量方式',
-  relevance: '对照岗位必备技能逐条自检，删掉无关内容，把时间花在后端能力上',
+  relevance: '对照目标岗位必备技能逐条自检，为每项要求准备一段项目实践证据',
   evidence: '为每个项目准备可追问的细节：模块划分、技术选型原因、遇到的坑和验证方式',
   tech: '复习岗位必备技能对应的基础原理，练习 3 道场景设计题并写下完整思路',
 };
 
 /** 生成（或返回缓存的）复盘报告 */
 export async function buildReport(sessionId: string): Promise<ReviewReport> {
+  return sharePending(getStore(), `report:${sessionId}`, () => generateReport(sessionId));
+}
+
+async function generateReport(sessionId: string): Promise<ReviewReport> {
   const store = getStore();
   const cached = await store.getReportBySession(sessionId);
   if (cached) return cached;
@@ -67,6 +73,9 @@ export async function buildReport(sessionId: string): Promise<ReviewReport> {
       maxScore: rd.maxScore,
       weight: rd.weight,
       evidence,
+      evidenceSourceId: worst?.evidenceSourceId,
+      evidenceQuestion: worst?.evidenceQuestion ?? session.questions.flatMap((q) => [q, ...q.followUps]).find((q) => q.id === worst?.evidenceSourceId)?.text,
+      scoringSources: [...new Set(perQ.map((d) => d.source))],
       suggestion: worst?.suggestion || DIM_ADVICE[rd.id] || '结合岗位要求补充具体细节与结果',
       source: perQ.some((d) => d.source === 'llm') ? 'llm' : 'rule',
     };
@@ -80,9 +89,9 @@ export async function buildReport(sessionId: string): Promise<ReviewReport> {
   // 规则版文案（兜底）
   const ruleMainIssues = sorted
     .slice(0, 2)
-    .map((d) => `${d.name}偏弱（${d.score}/${d.maxScore}）：${d.suggestion}`);
+    .map((d) => `${d.name}偏弱（${d.score}/${d.maxScore}）。回答证据：${d.evidence}。该维度权重为 ${d.weight * 100}%，是本轮优先补强项。行动：${d.suggestion}`);
   const ruleNext = sorted.slice(0, 2).map((d) => DIM_ADVICE[d.id] ?? d.suggestion);
-  const ruleChallenge = buildNextChallenge(role, sorted);
+  const ruleChallenge = buildNextChallenge(configureInterviewRole(role, parseInterviewSettings(session.settings)), sorted, session.settings?.maxFollowUps ?? 1);
 
   // LLM 文案（可选增强；失败用规则模板）
   const narrative = await chatJSON<ReportNarrative>({
@@ -98,7 +107,8 @@ export async function buildReport(sessionId: string): Promise<ReviewReport> {
     const baseReport = await store.getReportBySession(session.basedOnSessionId);
     if (baseReport) {
       const deltas: DimensionDelta[] = dims.map((d) => {
-        const before = baseReport.dimensionScores.find((x) => x.id === d.id)?.score ?? 0;
+        const baseDim = baseReport.dimensionScores.find((x) => x.id === d.id);
+        const before = baseDim?.score ?? 0;
         return {
           name: d.name,
           before,
@@ -106,6 +116,10 @@ export async function buildReport(sessionId: string): Promise<ReviewReport> {
           delta: Math.round((d.score - before) * 10) / 10,
           weight: d.weight,
           maxScore: d.maxScore,
+          beforeEvidence: baseDim?.evidence,
+          afterEvidence: d.evidence,
+          beforeSources: baseDim?.scoringSources ?? (baseDim ? [baseDim.source] : []),
+          afterSources: d.scoringSources,
         };
       });
       comparison = {
@@ -125,21 +139,27 @@ export async function buildReport(sessionId: string): Promise<ReviewReport> {
     sessionId,
     roleId: role.id,
     roleName: role.name,
+    jobProvenance: role.kind === 'job_posting' ? role.provenance : undefined,
     round: session.round,
     overallScore,
     jobReadiness,
     dimensionScores: dims,
-    mainIssues: narrative?.mainIssues ?? ruleMainIssues,
+    settings: session.settings,
+    resumeSummary: analysis ? {
+      matchingScore: analysis.matchingScore,
+      matchedSkills: analysis.matchedSkills,
+      gaps: analysis.gaps,
+      source: analysis.source,
+    } : undefined,
+    mainIssues: ruleMainIssues,
     evidence: dims
       .filter((d) => d.evidence)
       .slice(0, 3)
-      .map((d) => `${d.name}：「${d.evidence}」`),
+      .map((d) => `${d.name}：${d.evidence}`),
     nextStepSuggestions: narrative?.nextStepSuggestions ?? ruleNext,
     nextChallenge: {
-      focusAreas: narrative?.nextChallenge?.focusAreas?.length
-        ? narrative.nextChallenge.focusAreas
-        : ruleChallenge.focusAreas,
-      description: narrative?.nextChallenge?.description || ruleChallenge.description,
+      focusAreas: ruleChallenge.focusAreas,
+      description: ruleChallenge.description,
       // 推荐问题固定来自题库，保证第二轮“再次挑战”始终可用
       recommendedQuestions: ruleChallenge.recommendedQuestions,
     },
@@ -148,7 +168,9 @@ export async function buildReport(sessionId: string): Promise<ReviewReport> {
     createdAt: new Date().toISOString(),
   };
   await store.saveReport(report);
-  return report;
+  const saved = await store.getReportBySession(sessionId);
+  if (!saved) throw new ServiceError('训练会话不存在', 404);
+  return saved;
 }
 
 function readinessText(overall: number, weakestName: string): string {
@@ -161,16 +183,16 @@ function readinessText(overall: number, weakestName: string): string {
 function buildNextChallenge(
   role: RoleTarget,
   sortedDims: DimensionScore[],
+  maxFollowUps: number,
 ): { focusAreas: string[]; description: string; recommendedQuestions: string[] } {
   const weak = sortedDims.slice(0, 2);
   const dimIds = new Set(weak.map((d) => d.id));
   const tags = [...dimIds].flatMap((id) => DIM_TAGS[id] ?? []);
 
   const focusAreas = weak.map((d) => d.name);
-  const description = `本次专项挑战聚焦「${focusAreas.join('、')}」两个薄弱维度：会围绕你的简历项目和上一轮回答缺口重新出题，共 ${Math.min(
-    4,
-    role.interviewStages.length,
-  )} 题左右，重点验证上一轮暴露的问题是否改善。`;
+  const count = role.interviewStages.reduce((total, stage) => total + Math.min(stage.questionCount,
+    new Set(role.questionBank.filter((q) => q.stage === stage.id).map((q) => q.text.normalize('NFKC').replace(/\s+/g, '').toLowerCase())).size), 0);
+  const description = `本次专项挑战聚焦「${focusAreas.join('、')}」，共 ${count} 道主问题，每题最多 ${maxFollowUps} 次追问（总结题不追问）。优先选择首轮未问过的题目；候选不足时复用部分题目，以补充职责、方法和结果验证改进。去重按文本进行，不保证语义完全不同。`;
 
   const recommended = role.questionBank
     .filter((q) => q.tags.some((t) => tags.includes(t)) && q.stage !== 'wrap')

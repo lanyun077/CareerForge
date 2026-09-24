@@ -20,5 +20,5 @@ declare module 'pdfjs-dist/legacy/build/pdf.mjs' {
     isEvalSupported?: boolean;
     [key: string]: unknown;
   }
-  export function getDocument(params: GetDocumentParams): { promise: Promise<PDFDocumentProxy> };
+  export function getDocument(params: GetDocumentParams): { promise: Promise<PDFDocumentProxy>; destroy(): Promise<void> };
 }

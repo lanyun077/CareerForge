@@ -19,7 +19,7 @@ export function computeOverall(dims: { score: number; maxScore: number; weight: 
 const RULE_SUGGESTIONS: Record<string, string> = {
   structure: '用 STAR 结构重述：先说背景和目标，再说你的任务、具体行动，最后说结果',
   specificity: '补充具体模块名、数据规模和量化结果（响应时间、QPS、用户量等）',
-  relevance: '把回答聚焦到岗位关心的能力：接口设计、数据库、服务稳定性',
+  relevance: '对照目标岗位必备技能，说明你实际使用的方法、职责和验证结果',
   evidence: '给出能证明你亲手做的细节：模块划分、代码结构、遇到的问题和解决过程',
   tech: '先补全概念定义与原理，再结合一个实际使用场景说明',
 };
@@ -31,21 +31,33 @@ export async function scoreQuestion(
   q: AskedQuestion,
 ): Promise<DimensionScore[]> {
   const merged = mergeAnswer(q);
+  const sources = [{ id: q.id, text: q.answer ?? '' }, ...q.followUps.map((fu) => ({ id: fu.id, text: fu.answer ?? '' }))];
+  const rule = (id: string) => {
+    const result = ruleScoreOne(role, id, merged);
+    const answered = sources.filter((item) => item.text.trim());
+    const evidence = answered.map((item) => `${item.id === q.id ? '主回答' : '追问回答'}：「${item.text.length > 160 ? `${item.text.slice(0, 160)}…` : item.text}」`).join('\n');
+    return {
+      ...result,
+      evidence: evidence || '未采集到回答内容',
+      evidenceSourceId: answered.length === 1 ? answered[0].id : undefined,
+      evidenceQuestion: [q.text, ...q.followUps.filter((fu) => fu.answer?.trim()).map((fu) => `追问：${fu.text}`)].join('\n'),
+    };
+  };
   const llmDims = await chatJSON<(Omit<DimensionScore, 'source'> | null)[]>({
     system: SCORING_SYSTEM,
     user: buildScoringUserPrompt(role, analysis, q, merged),
     temperature: 0.1,
-    validate: (raw) => validateScoring(raw, role),
+    validate: (raw) => validateScoring(raw, role, sources),
   });
 
   if (llmDims) {
     return role.scoringRubric.map((rd, i) => {
       const fromLLM = llmDims[i];
       if (fromLLM) return { ...fromLLM, source: 'llm' as const };
-      return ruleScoreOne(role, rd.id, merged);
+      return rule(rd.id);
     });
   }
-  return role.scoringRubric.map((rd) => ruleScoreOne(role, rd.id, merged));
+  return role.scoringRubric.map((rd) => rule(rd.id));
 }
 
 /** 规则兜底评分：基于回答特征（长度 / 数字 / STAR 关键词 / 技术词覆盖），
@@ -101,7 +113,7 @@ function ruleScoreOne(role: RoleTarget, dimId: string, merged: string): Dimensio
 function mergeAnswer(q: AskedQuestion): string {
   const parts = [q.answer ?? ''];
   for (const fu of q.followUps) {
-    if (fu.answer) parts.push(`【追问】${fu.text}\n【追问回答】${fu.answer}`);
+    if (fu.answer) parts.push(fu.answer);
   }
   return parts.filter(Boolean).join('\n').trim();
 }

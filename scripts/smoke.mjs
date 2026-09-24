@@ -38,14 +38,18 @@ async function post(path, data) {
 /** 跑完一场面试：依次提交标准回答，直到 completed */
 async function runInterview(sessionId, answers) {
   let i = 0;
+  let current = (await api(`/api/interview/session/${sessionId}`)).body.data;
   for (let step = 0; step < 30; step++) {
+    const q = current.questions.at(-1);
     const { body } = await post('/api/interview/answer', {
       sessionId,
+      questionId: q.answer === undefined ? q.id : q.followUps.at(-1).id,
       answer: answers[i % answers.length],
     });
     if (!body.ok) throw new Error(`提交回答失败：${body.message}`);
     i++;
     const session = body.data.session;
+    current = session;
     if (body.data.event === 'completed') return session;
   }
   throw new Error('面试未在预期步数内结束（疑似死循环）');
@@ -110,8 +114,10 @@ async function main() {
   let stepSession = s1;
   let i = 0;
   for (let step = 0; step < 30; step++) {
+    const q = stepSession.questions.at(-1);
     const r = await post('/api/interview/answer', {
       sessionId: s1.id,
+      questionId: q.answer === undefined ? q.id : q.followUps.at(-1).id,
       answer: answers[i % answers.length],
     });
     if (!r.body.ok) throw new Error(`提交回答失败：${r.body.message}`);
