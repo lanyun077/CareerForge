@@ -1,5 +1,9 @@
 'use client';
 
+import type { InterviewSettings } from '@/lib/types';
+import { useAuthRecovery } from '@/app/components/useAuthRecovery';
+import { JobSource } from '@/app/components/JobSource';
+
 import { Suspense, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -8,6 +12,8 @@ import { getDemoResume } from '@/lib/demo/sampleResumes';
 import type { JobPosting, ResumeAnalysis, RoleProfile, RoleRecommendation, RoleTarget } from '@/lib/types';
 
 function ResumeClient() {
+  const { request, recovery, retryVersion } = useAuthRecovery();
+  const [settings, setSettings] = useState<InterviewSettings>({ questionCount: 7, difficulty: 'standard', maxFollowUps: 1 });
   const router = useRouter();
   const search = useSearchParams();
   const queryRoleId = search.get('roleId') ?? '';
@@ -20,9 +26,16 @@ function ResumeClient() {
   const [selectedRoleId, setSelectedRoleId] = useState(queryRoleId);
   const [recommendations, setRecommendations] = useState<RoleRecommendation[]>([]);
   const [jobText, setJobText] = useState('');
+  const [sourceUrl, setSourceUrl] = useState('');
+  const [company, setCompany] = useState('');
+  const [collectedSource, setCollectedSource] = useState<JobPosting['provenance']>();
+  const [collectionReceipt, setCollectionReceipt] = useState<string>();
+  const [collectingJob, setCollectingJob] = useState(false);
+  const [jobDraft, setJobDraft] = useState<{ title: string; description: string; responsibilities: string; requiredSkills: string; preferredSkills: string } | null>(null);
   const [roleQuery, setRoleQuery] = useState('');
   const [importingJob, setImportingJob] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [operation, setOperation] = useState<'analyze' | 'recommend' | null>(null);
   const [uploading, setUploading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [message, setMessage] = useState('');
@@ -37,18 +50,17 @@ function ResumeClient() {
   });
 
   useEffect(() => {
-    fetch('/api/roles')
+    request('/api/roles')
       .then((r) => r.json())
       .then((b) => {
         if (b.ok) {
           const loaded = b.data as RoleTarget[];
           setRoles(loaded);
-          if (queryRoleId && loaded.some((r) => r.id === queryRoleId)) setSelectedRoleId(queryRoleId);
-          else if (!queryRoleId) setSelectedRoleId('');
+          setSelectedRoleId((current) => loaded.some((r) => r.id === current) ? current : loaded.some((r) => r.id === queryRoleId) ? queryRoleId : '');
         }
       })
       .catch(() => undefined);
-  }, [queryRoleId]);
+  }, [queryRoleId, request, retryVersion]);
 
   useEffect(() => {
     if (demo) setText(demo.text);
@@ -64,10 +76,11 @@ function ResumeClient() {
       setMessage('简历文本过短（至少 50 字），请粘贴完整简历内容');
       return;
     }
+    setOperation('analyze');
     setLoading(true);
     setMessage('');
     try {
-      const res = await fetch('/api/resume/analyze', {
+      const res = await request('/api/resume/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ roleId: selectedRoleId, resumeText: text }),
@@ -85,13 +98,13 @@ function ResumeClient() {
     }
   }
 
-  async function uploadPdf(file: File) {
+  async function uploadDocument(file: File) {
     setUploading(true);
     setMessage('');
     try {
       const form = new FormData();
       form.append('file', file);
-      const res = await fetch('/api/resume/parse-pdf', { method: 'POST', body: form });
+      const res = await request(file.name.toLowerCase().endsWith('.docx') ? '/api/resume/parse-docx' : '/api/resume/parse-pdf', { method: 'POST', body: form });
       const body = await res.json();
       if (body.ok) {
         setText(body.data.text as string);
@@ -117,7 +130,7 @@ function ResumeClient() {
     setLoading(true);
     setMessage('');
     try {
-      const res = await fetch('/api/roles/recommend', {
+      const res = await request('/api/roles/recommend', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ resumeText: text }),
       });
@@ -130,7 +143,29 @@ function ResumeClient() {
     finally { setLoading(false); }
   }
 
-  async function importJob() {
+  async function collectJob() {
+    if (!sourceUrl.trim()) { setMessage('请先填写 Greenhouse 公开岗位链接'); return; }
+    setCollectingJob(true);
+    setMessage('');
+    try {
+      const res = await request('/api/roles/collect', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: sourceUrl.trim() }),
+      });
+      const body = await res.json();
+      if (!body.ok) { setMessage(body.message ?? '采集失败，可直接粘贴招聘描述'); return; }
+      setJobText(body.data.jobText);
+      setCollectedSource(body.data.provenance);
+      setCollectionReceipt(body.data.collectionReceipt);
+      setSourceUrl(body.data.provenance.sourceUrl ?? sourceUrl);
+      setCompany(body.data.provenance.company ?? '');
+      setJobDraft(null);
+      setMessage('已获取公开岗位内容，请核对后解析并预览。采集成功不代表仍在招聘。');
+    } catch { setMessage('采集失败，可直接粘贴招聘描述'); }
+    finally { setCollectingJob(false); }
+  }
+
+  async function importJob(confirm = false) {
     if (jobText.trim().length < 30) {
       setMessage('招聘描述过短，请粘贴完整 JD');
       return;
@@ -138,17 +173,27 @@ function ResumeClient() {
     setImportingJob(true);
     setMessage('');
     try {
-      const res = await fetch('/api/roles/import', {
+      const res = await request('/api/roles/import', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobText }),
+        body: JSON.stringify({ jobText, collectionReceipt, provenance: collectedSource ?? { sourceUrl: sourceUrl.trim() || undefined, company: company.trim() || undefined, method: 'manual' }, preview: !confirm, confirmed: confirm && jobDraft ? { ...jobDraft, responsibilities: jobDraft.responsibilities.split('\n'), requiredSkills: jobDraft.requiredSkills.split('\n'), preferredSkills: jobDraft.preferredSkills.split('\n') } : undefined }),
       });
       const body = await res.json();
       if (body.ok) {
         const role = body.data as JobPosting;
+        if (!confirm) {
+          setJobDraft({ title: role.name, description: role.description, responsibilities: role.requirements.responsibilities.join('\n'), requiredSkills: role.requirements.requiredSkills.map((s) => s.label).join('\n'), preferredSkills: role.requirements.preferredSkills.map((s) => s.label).join('\n') });
+          return;
+        }
         setRoles((prev) => [...prev.filter((r) => r.id !== role.id), role]);
         setSelectedRoleId(role.id);
         setRecommendations([]);
         setJobText('');
+        setSourceUrl('');
+        setCompany('');
+        setCollectedSource(undefined);
+        setCollectionReceipt(undefined);
+        setJobDraft(null);
+        setAnalysis(null);
       } else setMessage(body.message ?? '招聘描述解析失败，请重试');
     } catch { setMessage('网络异常，请重试'); }
     finally { setImportingJob(false); }
@@ -158,10 +203,10 @@ function ResumeClient() {
     if (!analysis) return;
     setStarting(true);
     try {
-      const res = await fetch('/api/interview/start', {
+      const res = await request('/api/interview/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ roleId: selectedRoleId, resumeAnalysisId: analysis.id }),
+        body: JSON.stringify({ roleId: analysis.roleId, resumeAnalysisId: analysis.id, settings }),
       });
       const body = await res.json();
       if (body.ok) {
@@ -183,7 +228,7 @@ function ResumeClient() {
   }
 
   return (
-    <div className="space-y-6">
+    <fieldset disabled={loading || uploading || importingJob || collectingJob || starting} aria-busy={loading || uploading || importingJob || collectingJob || starting} className="min-w-0 space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="cf-eyebrow">STEP 01 / MATCHING</p>
@@ -207,11 +252,19 @@ function ResumeClient() {
         </div>
       ) : null}
 
+      <Section title="面试强度设置" hint="配置会随训练保存；二轮沿用首轮设置。基础重概念，进阶要求方案比较、边界和验证。">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="text-sm">主问题数量<select className="cf-input mt-1 w-full p-2" value={settings.questionCount} onChange={(e) => setSettings({ ...settings, questionCount: Number(e.target.value) as 5 | 7 | 9 })}>{[5, 7, 9].map((n) => <option key={n} value={n}>{n} 道</option>)}</select></label>
+          <label className="text-sm">训练难度<select className="cf-input mt-1 w-full p-2" value={settings.difficulty} onChange={(e) => setSettings({ ...settings, difficulty: e.target.value as InterviewSettings['difficulty'] })}><option value="basic">基础</option><option value="standard">标准</option><option value="advanced">进阶</option></select></label>
+          <label className="text-sm">每题追问上限<select className="cf-input mt-1 w-full p-2" value={settings.maxFollowUps} onChange={(e) => setSettings({ ...settings, maxFollowUps: Number(e.target.value) as 0 | 1 | 2 })}>{[0, 1, 2].map((n) => <option key={n} value={n}>{n} 次</option>)}</select></label>
+        </div><p className="mt-2 text-xs text-slate-500">总结题不追问；上限不等于必问次数。不同难度的得分不宜直接比较。</p>
+      </Section>
       <Section title="输入简历">
         <div className="space-y-3">
           <textarea
+            aria-label="简历正文"
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => { setText(e.target.value); setAnalysis(null); setRecommendations([]); }}
             rows={10}
             placeholder="把简历全文粘贴到这里：教育经历、技能、项目经历、成果……"
             className="cf-input min-h-56 w-full p-4 font-mono text-sm leading-6"
@@ -222,42 +275,45 @@ function ResumeClient() {
               disabled={loading}
               className="cf-button-secondary px-4 py-2 font-medium disabled:opacity-50"
             >
-              {loading ? '推荐中…' : '根据简历推荐岗位'}
+              {loading && operation === 'recommend' ? '推荐中…' : '根据简历推荐岗位'}
             </button>
             <button
               onClick={analyze}
               disabled={loading}
               className="cf-button-primary px-4 py-2 font-medium disabled:opacity-50"
             >
-              {loading ? '分析中…' : '分析简历'}
+              {loading && operation === 'analyze' ? '分析中…' : '分析简历'}
             </button>
             <span className="text-slate-400">或</span>
             <input
+              aria-label="上传 PDF 或 DOCX 简历"
               ref={fileRef}
               type="file"
-              accept="application/pdf"
+              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               onChange={(e) => {
                 const f = e.target.files?.[0];
-                if (f) uploadPdf(f);
+                if (f) uploadDocument(f);
               }}
               className="max-w-full text-sm text-slate-600 file:mr-2 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200"
             />
-            {uploading ? <span className="text-xs text-slate-500">正在提取 PDF 文本…</span> : null}
+            {uploading ? <span className="text-xs text-slate-500">正在提取文档文本…</span> : null}
           </div>
-          <p className="text-xs text-slate-400">文本型 PDF 直接提取；扫描件会尝试使用配置的视觉模型 OCR。OCR 不可用时可直接粘贴简历文本。</p>
-          {message ? <p className="text-sm text-red-600">{message}</p> : null}
+          <p className="text-xs text-slate-400">支持 PDF（15 MB）与 DOCX（5 MB），提取后可编辑确认。文本型 PDF 直接提取；扫描件会尝试使用配置的视觉模型 OCR。OCR 不可用时可直接粘贴简历文本。</p>
+          {recovery}{message ? <p className="text-sm text-red-600">{message}</p> : null}
         </div>
       </Section>
 
       <Section title="选择目标岗位" hint="匹配度是简历与岗位描述的文本匹配程度，不代表录取概率">
         <div className="space-y-3 text-sm">
           <input
+            aria-label="搜索岗位"
             value={roleQuery}
             onChange={(e) => setRoleQuery(e.target.value)}
             placeholder="搜索岗位方向，例如 Agent、后端、数据、云原生、安全……"
             className="cf-input w-full p-2.5"
           />
           <select
+            aria-label="目标岗位"
             value={selectedRoleId}
             onChange={(e) => chooseRole(e.target.value)}
             className="cf-input w-full p-2.5"
@@ -266,6 +322,7 @@ function ResumeClient() {
             {filteredRoles.map((r) => <option key={r.id} value={r.id}>{r.name}{r.category ? ` · ${r.category}` : ''}</option>)}
           </select>
           {selectedRole ? <p className="text-xs text-slate-500">{selectedRole.description}</p> : null}
+          {selectedRole?.kind === 'job_posting' ? <JobSource provenance={selectedRole.provenance} /> : null}
           {recommendations.length ? (
             <div className="space-y-2">
               <p className="font-medium text-slate-700">推荐岗位（按匹配度排序）</p>
@@ -315,32 +372,43 @@ function ResumeClient() {
                 disabled={loading}
                 className="cf-button-primary px-4 py-2 text-sm font-medium disabled:opacity-50"
               >
-                {loading ? '分析中…' : '继续分析此岗位 →'}
+                {loading && operation === 'analyze' ? '分析中…' : '继续分析此岗位 →'}
               </button>
             </div>
           ) : null}
         </div>
       </Section>
 
-      <Section title="导入真实招聘描述" hint="建议粘贴招聘平台上的完整 JD；暂不自动抓取招聘网站">
+      <Section title="导入真实招聘描述" hint="粘贴完整 JD 并记录来源，或采集 Greenhouse 公开岗位；核对后再保存用于训练。">
         <div className="space-y-3">
+          <label className="block text-sm">岗位来源链接（选填）<input type="url" value={sourceUrl} maxLength={2048} onChange={(e) => { setSourceUrl(e.target.value); setCollectedSource(undefined); setCollectionReceipt(undefined); setJobDraft(null); }} placeholder="https://boards.greenhouse.io/公司/jobs/岗位编号" className="cf-input mt-1 w-full p-2.5" /></label>
+          <div className="flex flex-wrap items-center gap-3"><button onClick={collectJob} className="cf-button-secondary px-4 py-2 text-sm font-medium disabled:opacity-50">{collectingJob ? '获取岗位中…' : '采集 Greenhouse 岗位'}</button><p className="text-xs text-slate-500">仅支持公开 Greenhouse 单个岗位链接；其他来源请手动粘贴。</p></div>
+          <label className="block text-sm">公司名称（选填）<input value={company} maxLength={200} onChange={(e) => { setCompany(e.target.value); setCollectedSource(undefined); setCollectionReceipt(undefined); setJobDraft(null); }} className="cf-input mt-1 w-full p-2.5" /></label>
           <textarea
+            aria-label="招聘描述 JD"
             value={jobText}
-            onChange={(e) => setJobText(e.target.value)}
+            onChange={(e) => { setJobText(e.target.value); setCollectedSource(undefined); setCollectionReceipt(undefined); setJobDraft(null); }}
             rows={6}
             placeholder="粘贴岗位名称、工作职责、必备技能、加分项等招聘描述……"
             className="cf-input min-h-36 w-full p-3 text-sm leading-6"
           />
+          {collectedSource ? <JobSource provenance={collectedSource} /> : jobText ? <p className="text-xs text-slate-500">当前内容按手动导入记录，来源链接为用户提供。</p> : null}
+          <p className="text-xs text-slate-500">请仅导入有权使用的岗位内容。修改采集正文、来源或公司后，将按手动导入记录。</p>
           <button
-            onClick={importJob}
+            onClick={() => importJob()}
             disabled={importingJob}
             className="cf-button-secondary px-4 py-2 text-sm font-medium disabled:opacity-50"
           >
-            {importingJob ? '解析岗位中…' : '解析并选择这个岗位'}
+            {importingJob ? '解析岗位中…' : '解析并预览岗位'}
           </button>
         </div>
       </Section>
 
+      {jobDraft ? <Section title="确认目标岗位" hint="以下为解析整理内容，请对照上方 JD 原文修正后保存">
+        <div className="grid gap-3 md:grid-cols-2">{([['title', '岗位名称'], ['description', '岗位简介'], ['responsibilities', '职责（每行一项）'], ['requiredSkills', '必备技能（每行一项）'], ['preferredSkills', '加分技能（每行一项）']] as const).map(([key, label]) => <label key={key} className="text-sm">{label}<textarea value={jobDraft[key]} onChange={(event) => setJobDraft({ ...jobDraft, [key]: event.target.value })} className="cf-input mt-1 w-full p-3" rows={key === 'title' ? 1 : 3} /></label>)}</div>
+        <p className="mt-3 text-xs text-slate-500">确认后的岗位内容将用于本次训练快照。内存演示模式下，重启服务会丢失保存内容。</p>
+        <button disabled={importingJob} onClick={() => importJob(true)} className="cf-button-primary mt-3 px-4 py-2">确认并保存岗位</button>
+      </Section> : null}
       {analysis ? (
         <>
           <Section
@@ -440,7 +508,7 @@ function ResumeClient() {
           使用演示简历。
         </p>
       )}
-    </div>
+    </fieldset>
   );
 }
 

@@ -10,6 +10,7 @@ import type {
   ResumeSuggestion,
   RoleTarget,
 } from '@/lib/types';
+import { findEvidence } from './evidence';
 
 // ---------- 基础工具 ----------
 
@@ -48,6 +49,7 @@ export function validateResumeAnalysis(
   raw: unknown,
   role: RoleTarget,
   base: Omit<ResumeAnalysis, 'source' | 'createdAt' | 'id' | 'roleId' | 'resumeText'>,
+  resumeText: string,
 ): Omit<ResumeAnalysis, 'source' | 'createdAt' | 'id' | 'roleId' | 'resumeText'> | null {
   const r = asRecord(raw);
   if (!r) return null;
@@ -59,12 +61,14 @@ export function validateResumeAnalysis(
       if (!gr) return null;
       const requirement = asString(gr.requirement);
       if (!requirement) return null;
+      const evidence = asString(gr.evidence);
+      if (evidence && !findEvidence(evidence, [{ id: 'resume', text: resumeText }])) return null;
       return {
         requirement,
         current: asString(gr.current),
         problem: asString(gr.problem),
         suggestion: asString(gr.suggestion),
-        evidence: asString(gr.evidence),
+        evidence,
       };
     })
     .filter((g): g is ResumeGap => g !== null)
@@ -155,13 +159,15 @@ export interface FollowUpResult {
   reason: string;
 }
 
-export function validateFollowUp(raw: unknown): FollowUpResult | null {
+export function validateFollowUp(raw: unknown, sources: { id: string; text: string }[]): FollowUpResult | null {
   const r = asRecord(raw);
   if (!r) return null;
-  const needed = r.needFollowUp === true;
+  if (typeof r.needFollowUp !== 'boolean') return null;
+  const needed = r.needFollowUp;
   if (!needed) return { needed: false, text: '', reason: '' };
   const text = asString(r.text);
   if (text.length < 5 || text.length > 300) return null;
+  if (!text.includes('「') || !findEvidence(text, sources)) return null;
   return { needed: true, text, reason: asString(r.reason) || '针对回答中的信息缺口追问' };
 }
 
@@ -173,7 +179,7 @@ export interface ScoringResult {
 }
 
 /** 必须覆盖岗位评分规则的全部维度；缺失的维度用 null 占位由调用方补齐 */
-export function validateScoring(raw: unknown, role: RoleTarget): (Omit<DimensionScore, 'source'> | null)[] | null {
+export function validateScoring(raw: unknown, role: RoleTarget, sources: { id: string; text: string }[]): (Omit<DimensionScore, 'source'> | null)[] | null {
   const r = asRecord(raw);
   if (!r || !Array.isArray(r.dimensions)) return null;
   const byName = new Map<string, Record<string, unknown>>();
@@ -187,8 +193,9 @@ export function validateScoring(raw: unknown, role: RoleTarget): (Omit<Dimension
     if (!dr) return null;
     const evidence = asString(dr.evidence);
     const suggestion = asString(dr.suggestion);
-    const score = Math.round(clampNum(dr.score, 0, rd.maxScore, -1));
-    if (score < 0) return null;
+    const score = typeof dr.score === 'number' ? dr.score : NaN;
+    const evidenceSourceId = findEvidence(evidence, sources);
+    if (!Number.isInteger(score) || score < 0 || score > rd.maxScore || !suggestion || !evidenceSourceId) return null;
     return {
       id: rd.id,
       name: rd.name,
@@ -197,6 +204,7 @@ export function validateScoring(raw: unknown, role: RoleTarget): (Omit<Dimension
       weight: rd.weight,
       evidence,
       suggestion,
+      evidenceSourceId,
     };
   });
   // 至少一半维度合法才可用模型结果

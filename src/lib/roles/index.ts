@@ -1,8 +1,11 @@
 import type { JobPosting, RoleProfile, RoleTarget } from '@/lib/types';
 import { pythonBackendIntern } from './pythonBackendIntern';
 import { roleCatalog } from './catalog';
+import { specialistQuestions } from './specialistQuestions';
 
-const profiles: RoleProfile[] = [pythonBackendIntern, ...roleCatalog];
+const profiles: RoleProfile[] = [pythonBackendIntern, ...roleCatalog].map((role) => ({
+  ...role, questionBank: [...role.questionBank, ...(specialistQuestions[role.id] ?? [])],
+}));
 const globalState = globalThis as unknown as { __careerForgeJobPostings?: Map<string, JobPosting> };
 const jobPostings = globalState.__careerForgeJobPostings ??= new Map<string, JobPosting>();
 

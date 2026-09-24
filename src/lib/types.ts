@@ -69,7 +69,18 @@ export interface RoleProfile {
 }
 
 /** 具体企业岗位或用户导入的 JD，用于一次岗位快照和专项训练。 */
+export interface JobProvenance {
+  sourceUrl?: string;
+  company?: string;
+  collectedAt: string;
+  method: 'manual' | 'greenhouse_api';
+  requirementsReview?: 'automatic' | 'user_confirmed';
+  contentHash: string;
+  availability: 'unknown';
+}
+
 export interface JobPosting {
+  provenance?: JobProvenance;
   kind: 'job_posting';
   id: string;
   name: string;
@@ -184,6 +195,11 @@ export interface ResumeAnalysis {
 }
 
 // ===== 面试 =====
+export interface InterviewSettings {
+  questionCount: 5 | 7 | 9;
+  difficulty: 'basic' | 'standard' | 'advanced';
+  maxFollowUps: 0 | 1 | 2;
+}
 
 export interface FollowUp {
   id: string;
@@ -217,6 +233,7 @@ export interface StagePlanItem {
 }
 
 export interface InterviewSession {
+  settings?: InterviewSettings;
   id: string;
   roleId: string;
   roleName: string;
@@ -241,6 +258,10 @@ export interface InterviewSession {
 // ===== 评分 =====
 
 export interface DimensionScore {
+  /** 引用来自主回答或追问回答的 ID；旧报告可能没有此字段。 */
+  evidenceSourceId?: string;
+  evidenceQuestion?: string;
+  scoringSources?: ('llm' | 'rule')[];
   id: string;
   name: string;
   score: number;
@@ -255,6 +276,10 @@ export interface DimensionScore {
 // ===== 复盘报告 =====
 
 export interface DimensionDelta {
+  beforeEvidence?: string;
+  afterEvidence?: string;
+  beforeSources?: ('llm' | 'rule')[];
+  afterSources?: ('llm' | 'rule')[];
   name: string;
   before: number;
   after: number;
@@ -280,6 +305,10 @@ export interface NextChallenge {
 }
 
 export interface ReviewReport {
+  jobProvenance?: JobProvenance;
+  settings?: InterviewSettings;
+  /** 当次简历分析摘要；旧报告可能没有，不包含简历正文。 */
+  resumeSummary?: Pick<ResumeAnalysis, 'matchingScore' | 'matchedSkills' | 'gaps' | 'source'>;
   id: string;
   sessionId: string;
   roleId: string;
@@ -323,9 +352,11 @@ export interface SessionSummary {
  */
 export interface Store {
   kind: 'memory' | 'postgres';
-  saveResumeAnalysis(a: ResumeAnalysis): Promise<void>;
+  saveResumeAnalysis(a: ResumeAnalysis, snapshots?: RoleSnapshot[]): Promise<void>;
   getResumeAnalysis(id: string): Promise<ResumeAnalysis | null>;
-  saveSession(s: InterviewSession): Promise<void>;
+  saveSession(s: InterviewSession, snapshots?: RoleSnapshot[]): Promise<void>;
+  /** 仅在题目状态未变化且会话仍进行中时原子保存；不存在时不新建。 */
+  updateSession(s: InterviewSession, previousQuestions: AskedQuestion[]): Promise<boolean>;
   getSession(id: string): Promise<InterviewSession | null>;
   saveReport(r: ReviewReport): Promise<void>;
   getReportBySession(sessionId: string): Promise<ReviewReport | null>;
@@ -335,6 +366,8 @@ export interface Store {
   saveJobPosting(job: JobPosting): Promise<void>;
   getJobPosting(id: string): Promise<JobPosting | null>;
   listJobPostings(): Promise<JobPosting[]>;
-  saveRecommendation(record: RecommendationRecord): Promise<void>;
+  saveRecommendation(record: RecommendationRecord, snapshots?: RoleSnapshot[]): Promise<void>;
+  listRecommendations(): Promise<RecommendationRecord[]>;
+  clearRecommendations(): Promise<void>;
   saveRoleSnapshot(snapshot: RoleSnapshot): Promise<void>;
 }

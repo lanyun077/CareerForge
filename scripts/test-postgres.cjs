@@ -1,0 +1,90 @@
+const assert = require('node:assert/strict');
+const { randomUUID } = require('node:crypto');
+const { readFileSync } = require('node:fs');
+const { PGlite } = require('@electric-sql/pglite');
+const { load } = require('./test-core.cjs');
+
+async function main() {
+  const db = new PGlite();
+  try {
+    const schema = readFileSync('db/schema.sql', 'utf8');
+    await db.exec(schema);
+    await db.exec(schema);
+    const query = async (sql, params) => {
+      const result = await db.query(sql, params);
+      return { rows: result.rows, rowCount: result.affectedRows || result.rows.length };
+    };
+    const pool = { query, connect: async () => ({ query, release() {} }) };
+    const { PostgresStore } = load('src/lib/store/postgresStore.ts');
+    const alice = new PostgresStore('postgres://unused', 'alice');
+    const bob = new PostgresStore('postgres://unused', 'bob');
+    alice.pool = pool;
+    bob.pool = pool;
+    const { listRoleProfiles } = load('src/lib/roles/index.ts');
+    const now = new Date().toISOString();
+    const provenance = { sourceUrl: 'https://job-boards.greenhouse.io/example/jobs/123', company: 'Fixture Company', collectedAt: now, method: 'greenhouse_api', contentHash: 'a'.repeat(64), availability: 'unknown' };
+    const role = { ...listRoleProfiles()[0], id: randomUUID(), kind: 'job_posting', source: 'authorized_api', rawDescription: '虚构岗位测试正文', fetchedAt: now, sourceUrl: provenance.sourceUrl, company: provenance.company, provenance };
+    await alice.saveJobPosting(role);
+    assert.deepEqual((await alice.getJobPosting(role.id)).provenance, provenance);
+    assert.deepEqual((await alice.listJobPostings())[0].provenance, provenance);
+    assert.equal(await bob.getJobPosting(role.id), null);
+    assert.deepEqual(await bob.listJobPostings(), []);
+    await bob.saveJobPosting({ ...role, provenance: { ...provenance, company: 'Unauthorized overwrite' } });
+    assert.deepEqual((await alice.getJobPosting(role.id)).provenance, provenance);
+    const analysis = { id: randomUUID(), roleId: role.id, resumeText: '虚构简历', matchingScore: 50, source: 'rule', createdAt: now };
+    await alice.saveResumeAnalysis(analysis);
+    const failedAnalysis = { ...analysis, id: randomUUID() };
+    await assert.rejects(() => alice.saveResumeAnalysis(failedAnalysis, [{ id: 'invalid-uuid', referenceId: failedAnalysis.id, context: 'resume_analysis', roleId: role.id, role, createdAt: now }]));
+    assert.equal(await alice.getResumeAnalysis(failedAnalysis.id), null);
+    assert.equal(await bob.getResumeAnalysis(analysis.id), null);
+    const session = { id: randomUUID(), roleId: role.id, roleName: role.name, roleSnapshot: role, resumeAnalysisId: analysis.id, round: 1, plan: [], questions: [], currentPlanIndex: 0, status: 'active', startedAt: now };
+    session.settings = { questionCount: 9, difficulty: 'advanced', maxFollowUps: 2 };
+    await alice.saveSession(session);
+    assert.deepEqual((await alice.getSession(session.id)).settings, session.settings);
+    assert.equal(await bob.getSession(session.id), null);
+    assert.equal((await alice.getSession(session.id)).roleSnapshot.id, role.id);
+    assert.deepEqual((await alice.getSession(session.id)).roleSnapshot.provenance, provenance);
+    const changed = { ...session, questions: [{ id: 'q', answer: '测试回答', followUps: [] }], currentPlanIndex: 1 };
+    const results = await Promise.all([alice.updateSession(changed, []), alice.updateSession(changed, [])]);
+    assert.deepEqual(results.sort(), [false, true]);
+    assert.equal(await bob.updateSession(changed, changed.questions), false);
+    assert.equal(await bob.deleteRecord(session.id), false);
+    assert.equal((await bob.listSessions()).length, 0);
+    const second = { ...session, id: randomUUID(), round: 2, basedOnSessionId: session.id };
+    await alice.saveSession(second);
+    const report = { id: randomUUID(), sessionId: second.id, roleId: role.id, round: 2, overallScore: 50, dimensionScores: [], comparison: { baseSessionId: session.id }, source: 'rule', createdAt: now, jobProvenance: provenance };
+    await alice.saveReport(report);
+    assert.deepEqual((await alice.getReportBySession(second.id)).jobProvenance, provenance);
+    await alice.saveJobPosting({ ...role, provenance: { ...provenance, contentHash: 'b'.repeat(64), company: 'Updated fixture' } });
+    assert.deepEqual((await alice.getSession(second.id)).roleSnapshot.provenance, provenance, 'Session snapshot must preserve the source version used for training');
+    assert.deepEqual((await alice.getReportBySession(second.id)).jobProvenance, provenance, 'Report must preserve the source version used for training');
+    assert.equal(await bob.getReportBySession(second.id), null);
+    for (const [context, referenceId] of [['resume_analysis', analysis.id], ['interview_session', session.id], ['interview_session', second.id], ['recommendation', role.id]]) {
+      await alice.saveRoleSnapshot({ id: randomUUID(), referenceId, context, roleId: role.id, role, createdAt: now });
+    }
+    await alice.saveRecommendation({ id: randomUUID(), resumeText: '测试文本', recommendations: [], createdAt: now });
+    assert.equal((await bob.listRecommendations()).length, 0);
+    await alice.clearRecommendations();
+    assert.equal((await alice.listRecommendations()).length, 0);
+    assert.equal((await db.query("select * from role_snapshots where context = 'recommendation'")).rows.length, 0);
+    await alice.deleteRecord(session.id);
+    assert(await alice.getResumeAnalysis(analysis.id));
+    assert.equal((await alice.getSession(second.id)).basedOnSessionId, undefined);
+    assert.equal((await alice.getReportBySession(second.id)).comparison, undefined);
+    assert.deepEqual((await alice.getReportBySession(second.id)).jobProvenance, provenance);
+    await alice.saveReport(report);
+    assert.equal((await alice.getReportBySession(second.id)).comparison, undefined, 'Late report must not restore a deleted comparison');
+    await alice.deleteRecord(second.id);
+    await assert.rejects(() => alice.saveReport(report), (error) => error.status === 404);
+    assert.equal(await alice.getReportBySession(second.id), null);
+    assert.equal(await alice.getResumeAnalysis(analysis.id), null);
+    assert.equal((await db.query('select * from role_snapshots')).rows.length, 0);
+    assert.equal(await alice.updateSession(changed, changed.questions), false);
+    const legacyId = randomUUID();
+    await db.query("insert into resume_analyses(id,role_id,resume_text,matching_score,payload,source) values($1,'legacy','legacy',0,'{}','rule')", [legacyId]);
+    assert.equal(await alice.getResumeAnalysis(legacyId), null);
+    assert.equal(await bob.getResumeAnalysis(legacyId), null);
+    console.log('✓ PostgreSQL 引擎：schema 重复执行、用户隔离、岗位/会话/报告来源持久化与版本隔离、快照读写及失败回滚、并发条件更新、事务删除、推荐清空和历史无主数据隔离通过');
+  } finally { await db.close(); }
+}
+main().catch((error) => { console.error(error); process.exitCode = 1; });

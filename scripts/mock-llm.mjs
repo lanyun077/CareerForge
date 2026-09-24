@@ -25,7 +25,7 @@ const DIMENSIONS = [
   { name: '技术完整度', score: 4, maxScore: 5, evidence: '「mock证据：解释了索引与慢查询」', suggestion: '补充边界情况与取舍' },
 ];
 
-function mockContentFor(system) {
+function mockContentFor(system, user) {
   if (system.includes('简历分析')) {
     return {
       extractedFields: {
@@ -80,15 +80,17 @@ function mockContentFor(system) {
       ],
     };
   }
-  if (system.includes('追问')) {
+  if (system.includes('追问生成模块')) {
+    const quote = user.split('【候选人回答】\n')[1]?.split('\n')[0]?.slice(0, 24) || '无回答';
     return {
       needFollowUp: true,
-      text: '你刚才提到「负责了系统的后端开发」——具体是哪几个模块？其中遇到过什么问题，你是如何验证解决方案有效的？',
+      text: `你刚才提到「${quote}」——具体是哪几个模块？其中遇到过什么问题，你是如何验证解决方案有效的？`,
       reason: '回答中「负责后端开发」缺少模块、问题与验证方式（mock）',
     };
   }
-  if (system.includes('评分')) {
-    return { dimensions: DIMENSIONS, followUpReason: '回答缺少量化与验证细节（mock）', confidence: 'medium' };
+  if (system.includes('评分模块')) {
+    const quote = user.split('【候选人回答】\n')[1]?.split('\n')[0]?.slice(0, 24) || '无回答';
+    return { dimensions: DIMENSIONS.map((dim) => ({ ...dim, evidence: `「${quote}」` })), followUpReason: '回答缺少量化与验证细节（mock）', confidence: 'medium' };
   }
   if (system.includes('复盘')) {
     return {
@@ -116,21 +118,23 @@ const server = http.createServer((req, res) => {
   req.on('end', () => {
     let system = '';
     let userLen = 0;
+    let user = '';
     try {
       const parsed = JSON.parse(body);
       system = String(parsed?.messages?.[0]?.content ?? '');
-      userLen = String(parsed?.messages?.[1]?.content ?? '').length;
+      user = String(parsed?.messages?.[1]?.content ?? '');
+      userLen = user.length;
     } catch {
       /* ignore */
     }
-    const content = garbage ? '很抱歉，我无法以JSON形式回答{{{bad' : JSON.stringify(mockContentFor(system));
+    const content = garbage ? '很抱歉，我无法以JSON形式回答{{{bad' : JSON.stringify(mockContentFor(system, user));
     const tag = garbage ? 'GARBAGE' : system.includes('简历分析')
       ? 'resume'
       : system.includes('面试出题')
         ? 'plan'
         : system.includes('追问')
           ? 'followup'
-          : system.includes('评分')
+          : system.includes('评分模块')
             ? 'scoring'
             : system.includes('复盘')
               ? 'report'

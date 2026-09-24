@@ -68,12 +68,16 @@ const VAGUE_ANSWERS = [
 
 async function runInterview(sessionId, answers) {
   let i = 0;
+  let current = (await api(`/api/interview/session/${sessionId}`)).data;
   for (let step = 0; step < 30; step++) {
+    const q = current.questions.at(-1);
     const body = await post('/api/interview/answer', {
       sessionId,
+      questionId: q.answer === undefined ? q.id : q.followUps.at(-1).id,
       answer: answers[i++ % answers.length],
     });
     if (!body.ok) throw new Error(`提交回答失败：${body.message}`);
+    current = body.data.session;
     if (body.data.event === 'completed') return body.data.session;
   }
   throw new Error('面试未在预期步数内结束');

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import './globals.css';
+import { AccountLink } from './components/AccountLink';
 
 export const metadata: Metadata = {
   title: 'CareerForge · AI求职实训教练',
@@ -20,6 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <span className="hidden border-l border-white/20 pl-3 text-xs text-slate-300 sm:inline">AI 求职实训工作台</span>
             </Link>
             <nav className="flex items-center gap-1 text-sm text-slate-300">
+              <AccountLink />
               <Link href="/" className="rounded-md px-3 py-1.5 hover:bg-white/10 hover:text-white">
                 首页
               </Link>

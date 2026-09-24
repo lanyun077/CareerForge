@@ -5,6 +5,7 @@
 
 # next.js
 /.next/
+/.validation/
 /out/
 
 # production

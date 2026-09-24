@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "purpose": "人工复核真实公开岗位的来源追溯、技能分类与题目相关性；不代表招聘仍开放或模型质量已经通过",
+  "sourceDocumentation": "https://docs.greenhouse.io/job-board.html",
+  "samples": [
+    {
+      "company": "GitLab",
+      "title": "AI Engineer",
+      "provider": "greenhouse",
+      "board": "gitlab",
+      "externalId": "8556658002",
+      "sourceUrl": "https://job-boards.greenhouse.io/gitlab/jobs/8556658002",
+      "apiUrl": "https://boards-api.greenhouse.io/v1/boards/gitlab/jobs/8556658002",
+      "accessedAt": "2026-09-22T15:54:57.767Z",
+      "httpStatus": 200,
+      "sourceUpdatedAt": "2026-09-14T16:01:39-04:00",
+      "availability": "unknown",
+      "excerpts": [
+        { "quote": "at least one modern scripting language (Python, JavaScript/TypeScript, or similar)", "expected": "脚本语言至少一种，不能要求同时掌握列出的所有语言" },
+        { "quote": "REST APIs, GraphQL, and integration patterns", "expected": "API 与系统集成" },
+        { "quote": "managing context windows, structuring multi-turn interactions, evaluating output quality", "expected": "提示设计、上下文管理与质量评估" },
+        { "quote": "prompt injection defences, and data leakage prevention", "expected": "提示注入防御与数据泄漏防护" },
+        { "quote": "Experience with GitLab platform and CI/CD workflows", "expected": "优选项，不能标成必备条件" }
+      ],
+      "reviewStatus": "pending",
+      "expectedQuestionThemes": ["API 集成中的鉴权与错误恢复", "上下文、RAG 与模型成本取舍", "提示注入与输出质量评估"],
+      "unsupportedClaims": ["GitLab 已认可平台评分", "预测候选人录取概率", "这是应届实习岗位", "所有脚本语言均为硬性要求"]
+    },
+    {
+      "company": "GitLab",
+      "title": "Backend Engineer (Ruby), AI Engineering: Agent Observability",
+      "provider": "greenhouse",
+      "board": "gitlab",
+      "externalId": "8620720002",
+      "sourceUrl": "https://job-boards.greenhouse.io/gitlab/jobs/8620720002",
+      "apiUrl": "https://boards-api.greenhouse.io/v1/boards/gitlab/jobs/8620720002",
+      "accessedAt": "2026-09-22T15:54:59.928Z",
+      "httpStatus": 200,
+      "sourceUpdatedAt": "2026-09-14T16:01:39-04:00",
+      "availability": "unknown",
+      "excerpts": [
+        { "quote": "production applications with Ruby on Rails", "expected": "Ruby on Rails 生产应用经验属于主要要求" },
+        { "quote": "Python backends and/or Vue frontends a plus", "expected": "Python 或 Vue 为加分项，不能替代 Ruby 主要求" },
+        { "quote": "REST and/or GraphQL APIs", "expected": "API 设计，不把 and/or 误转成两项都必须" },
+        { "quote": "relational databases such as PostgreSQL", "expected": "关系型数据库，PostgreSQL 是明确示例" },
+        { "quote": "automated testing, including RSpec", "expected": "自动化测试职责，RSpec 是明确技术线索" }
+      ],
+      "reviewStatus": "pending",
+      "expectedQuestionThemes": ["Rails 后台任务与数据模型", "API 向后兼容和可扩展性", "SQL 查询效率与自动化测试", "线上故障根因与可观测性"],
+      "unsupportedClaims": ["这是 Python 后端主岗", "Vue 是必备条件", "所有数据库品牌均必须掌握", "岗位目前保证开放"]
+    }
+  ]
+}

@@ -1,8 +1,9 @@
+import { jobContentHash, resolveJobProvenance } from '@/lib/jobProvenance';
 import { randomUUID } from 'crypto';
 import { chatJSON } from '@/lib/llm/client';
 import { asRecord, asString, asStringArray } from '@/lib/llm/validate';
 import { JOB_PARSE_SYSTEM, ROLE_MATCH_SYSTEM } from '@/lib/llm/prompts';
-import { listRoleProfiles, listRoles, registerJobPosting, getRole } from '@/lib/roles';
+import { listRoleProfiles } from '@/lib/roles';
 import { createJobPosting } from '@/lib/roles/roleFactory';
 import { getStore } from '@/lib/store/memoryStore';
 import type { JobPosting, RoleProfile, RoleRecommendation, RoleTarget } from '@/lib/types';
@@ -150,21 +151,18 @@ export async function recommendRoles(resumeText: string): Promise<RoleRecommenda
     resumeText,
     recommendations,
     createdAt: now,
-  });
-  for (const recommendation of recommendations) {
-    await getStore().saveRoleSnapshot({
+  }, recommendations.map((recommendation) => ({
       id: randomUUID(),
       referenceId: recommendation.role.id,
-      context: 'recommendation',
+      context: 'recommendation' as const,
       roleId: recommendation.role.id,
       role: recommendation.role,
       createdAt: now,
-    });
-  }
+    })));
   return recommendations;
 }
 
-interface ParsedJob {
+export interface ParsedJob {
   title: string;
   description: string;
   responsibilities: string[];
@@ -174,35 +172,76 @@ interface ParsedJob {
 
 function parseList(text: string, markers: string[]): string[] {
   const out: string[] = [];
-  for (const line of text.split(/\n+/).map((x) => x.trim()).filter(Boolean)) {
-    if (markers.some((m) => line.toLowerCase().includes(m.toLowerCase()))) {
-      const cleaned = line.replace(/^[-*•\d.、\s]+/, '').slice(0, 100);
-      if (cleaned.length >= 2) out.push(cleaned);
+  let inSection = false;
+  for (const raw of text.split(/\n+/)) {
+    const line = raw.trim().replace(/^[-*•\d.、\s]+/, '');
+    if (!line) continue;
+    const heading = /^(?:工作内容|工作职责|岗位职责|职责|任职要求|岗位要求|技能要求|加分项?|优先条件|responsibilities|requirements|qualifications|preferred(?: requirements| qualifications| skills)?|nice[- ]to[- ]have|bonus|what you['’]ll (?:do|bring)|about (?:the team|us))[:：]?$/i.test(line);
+    if (heading) {
+      inSection = markers.some((m) => line.toLowerCase().includes(m.toLowerCase()));
+      continue;
+    }
+    if (inSection || markers.some((m) => line.toLowerCase().includes(m.toLowerCase()))) {
+      if (line.length >= 2) out.push(line.slice(0, 200));
     }
   }
   return [...new Set(out)].slice(0, 12);
 }
 
 function fallbackJob(text: string): ParsedJob {
-  const lines = text.split(/\n+/).map((x) => x.trim()).filter(Boolean);
-  const title = lines.find((x) => /工程师|开发|分析|测试|产品|运营/.test(x))?.slice(0, 50) || '自定义岗位';
-  const known = ['Python', 'Java', 'JavaScript', 'TypeScript', 'React', 'Vue', 'SQL', 'MySQL', 'PostgreSQL', 'Redis', 'Docker', 'Linux', 'Spring', 'FastAPI', 'Flask', 'Django', 'Excel', 'Pandas', '机器学习', '测试', '自动化'];
-  const requiredSkills = known.filter((k) => text.toLowerCase().includes(k.toLowerCase()));
+  const lines = text.split(/\n+/).map((x) => x.trim().replace(/^[-*•\d.、\s]+/, '')).filter(Boolean);
+  const title = lines.find((x) => x.length <= 120 && /工程师|开发|分析|测试|产品|运营|engineer|developer|analyst|designer|manager/i.test(x))?.slice(0, 80) || '自定义岗位';
+  const known = ['Python', 'Java', 'JavaScript', 'TypeScript', 'Ruby', 'Rails', 'React', 'Vue', 'SQL', 'MySQL', 'PostgreSQL', 'Redis', 'Docker', 'Linux', 'Spring', 'FastAPI', 'Flask', 'Django', 'REST', 'GraphQL', 'RSpec', 'LLM', 'RAG', 'GitLab', 'CI/CD', 'prompt engineering', 'Excel', 'Pandas', '机器学习', '测试', '自动化'];
+  const requiredSkills: string[] = [];
+  const preferredSkills: string[] = [];
+  const hasRequirementsSection = lines.some((line) => /^(?:任职要求|岗位要求|技能要求|requirements|qualifications|what you['’]ll bring)[:：]?$/i.test(line));
+  let section: 'required' | 'preferred' | 'other' = hasRequirementsSection ? 'other' : 'required';
+  for (const line of lines) {
+    if (line === title || line.startsWith(title) && title !== '自定义岗位') continue;
+    if (/^(?:加分项?|优先条件|preferred(?: requirements| qualifications| skills)?|nice[- ]to[- ]have|bonus)[:：]?$/i.test(line)) { section = 'preferred'; continue; }
+    if (/^(?:任职要求|岗位要求|技能要求|requirements|qualifications|what you['’]ll bring)[:：]?$/i.test(line)) { section = 'required'; continue; }
+    if (/^(?:工作内容|工作职责|岗位职责|职责|responsibilities|what you['’]ll do|about (?:the team|us)|benefits)[:：]?$/i.test(line)) { section = 'other'; continue; }
+    const optional = section === 'preferred' || /加分|优先|\b(?:preferred|bonus|plus|nice[- ]to[- ]have|optional)\b/i.test(line);
+    if (section === 'other' && !optional) continue;
+    const matched = known.filter((skill) => /^[a-z]/i.test(skill)
+      ? new RegExp('(^|[^a-zA-Z0-9_])' + skill + '(?=$|[^a-zA-Z0-9_])', 'i').test(line)
+      : line.includes(skill));
+    if (!matched.length) continue;
+    const target = optional ? preferredSkills : requiredSkills;
+    const language = 'Python|Java|JavaScript|TypeScript|Ruby';
+    const englishChoice = line.match(/\bat least one\b[^()\n]*\(([^)]+)\)/i);
+    const chineseChoice = line.match(new RegExp('^(?:熟悉|掌握)?\\s*((?:' + language + ')(?:\\s*(?:或|/)\\s*(?:' + language + '))+)\\s*(?:至少一种|任选一种|之一)[。.]?$', 'i'));
+    const choice = englishChoice ?? chineseChoice;
+    if (choice) {
+      const options = known.filter((skill) => new RegExp('^(?:' + language + ')$', 'i').test(skill)
+        && new RegExp('(^|[^a-zA-Z0-9_])' + skill + '(?=$|[^a-zA-Z0-9_])', 'i').test(choice[1]));
+      if (options.length >= 2) {
+        target.push(`${options.join(' / ')}（至少一种）`);
+        const outside = line.replace(choice[0], '');
+        target.push(...matched.filter((skill) => new RegExp('(^|[^a-zA-Z0-9_])' + skill + '(?=$|[^a-zA-Z0-9_])', 'i').test(outside)));
+        continue;
+      }
+    }
+    // Keep alternatives together: splitting an OR statement invents mandatory requirements.
+    if (matched.length > 1 && /\bor\b|\bat least one\b|任选|至少一种|或|之一/i.test(line)) target.push(line.slice(0, 200));
+    else target.push(...matched);
+  }
   return {
     title,
     description: lines.slice(0, 4).join(' ').slice(0, 300),
-    responsibilities: parseList(text, ['负责', '参与', '工作内容', '职责']),
-    requiredSkills: requiredSkills.length ? requiredSkills : ['岗位核心技能'],
-    preferredSkills: parseList(text, ['加分', '优先', '熟悉', '了解']).slice(0, 6),
+    responsibilities: parseList(text, ['负责', '参与', '工作内容', '职责', 'responsibilities', "what you'll do", 'what you’ll do']),
+    requiredSkills: requiredSkills.length ? [...new Set(requiredSkills)].slice(0, 15) : ['岗位核心技能（请根据原文确认）'],
+    preferredSkills: [...new Set(preferredSkills)].slice(0, 10),
   };
 }
 
-export async function importJobPosting(text: string): Promise<JobPosting> {
-  const normalizedText = text.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+export async function importJobPosting(text: string, options: { preview?: boolean; confirmed?: ParsedJob; provenance?: unknown; collectionReceipt?: unknown } = {}): Promise<JobPosting> {
+  const normalizedText = options.collectionReceipt ? text : text.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+  const provenance = resolveJobProvenance(text, options.provenance, options.collectionReceipt);
   const fallback = fallbackJob(normalizedText);
-  const parsed = await chatJSON<ParsedJob>({
+  const parsed = options.confirmed ?? await chatJSON<ParsedJob>({
     system: JOB_PARSE_SYSTEM,
-    user: `请解析以下招聘描述，只使用其中明确出现的信息：\n${normalizedText.slice(0, 8000)}`,
+    user: `请解析以下招聘描述，只使用其中明确出现的信息：\n${normalizedText.slice(0, 12000)}`,
     temperature: 0.1,
     timeoutMs: 20_000,
     validate: (raw) => {
@@ -218,7 +257,12 @@ export async function importJobPosting(text: string): Promise<JobPosting> {
     },
   });
   const parsedJob = parsed ?? fallback;
-  const toSkills = (labels: string[]) => labels.map((label) => ({ label, keywords: [label] }));
+  const toSkills = (labels: string[]) => labels.map((label) => ({
+    label,
+    keywords: /^(?:Python|Java|JavaScript|TypeScript|Ruby)(?: \/ (?:Python|Java|JavaScript|TypeScript|Ruby))+（至少一种）$/.test(label)
+      ? label.replace('（至少一种）', '').split(' / ')
+      : [label],
+  }));
   const job = createJobPosting({
     id: `custom-${randomUUID()}`,
     name: parsedJob.title,
@@ -230,24 +274,24 @@ export async function importJobPosting(text: string): Promise<JobPosting> {
     isMock: false,
     rawDescription: normalizedText,
     source: 'user_jd',
+    sourceUrl: provenance.sourceUrl,
+    company: provenance.company,
   });
-  registerJobPosting(job);
-  await getStore().saveJobPosting(job);
+  job.provenance = { ...provenance, contentHash: jobContentHash(normalizedText), requirementsReview: options.confirmed ? 'user_confirmed' : 'automatic' };
+  if (!options.preview) await getStore().saveJobPosting(job);
   return job;
 }
 
 /** 从数据库恢复用户导入的岗位，供岗位列表和直接 API 调用使用。 */
 export async function listAvailableRoles(): Promise<RoleTarget[]> {
   const persisted = await getStore().listJobPostings();
-  for (const job of persisted) registerJobPosting(job);
-  return listRoles();
+  return [...listRoleProfiles(), ...persisted];
 }
 
 /** 获取静态职业方向或持久化的具体岗位。 */
 export async function getTargetRole(id: string): Promise<RoleTarget | null> {
-  const local = getRole(id);
+  const local = listRoleProfiles().find((role) => role.id === id);
   if (local) return local;
   const persisted = await getStore().getJobPosting(id);
-  if (persisted) registerJobPosting(persisted);
   return persisted;
 }

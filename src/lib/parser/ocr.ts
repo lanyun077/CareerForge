@@ -1,6 +1,6 @@
 import { deflateSync } from 'zlib';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { getLLMConfig } from '@/lib/llm/client';
+import { getOcrConfig } from './ocrConfig';
 
 interface PdfImage {
   data: Uint8Array;
@@ -94,13 +94,11 @@ async function imagesFromPage(page: { getOperatorList: () => Promise<{ argsArray
   return images;
 }
 
-async function ocrImage(imageUrl: string, model: string, timeoutMs: number): Promise<string> {
-  const cfg = getLLMConfig();
-  if (!cfg) throw new Error('OCR 未配置大模型 API');
-  const apiKey = process.env.OCR_API_KEY?.trim() || cfg.apiKey;
-  const res = await fetch(`${(process.env.OCR_BASE_URL || cfg.baseUrl).replace(/\/+$/, '')}/chat/completions`, {
+async function ocrImage(imageUrl: string, model: string, timeoutMs: number, signal?: AbortSignal): Promise<string> {
+  const cfg = getOcrConfig();
+  const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
     body: JSON.stringify({
       model,
       temperature: 0,
@@ -109,7 +107,7 @@ async function ocrImage(imageUrl: string, model: string, timeoutMs: number): Pro
         { type: 'image_url', image_url: { url: imageUrl } },
       ] }],
     }),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`OCR 模型请求失败（HTTP ${res.status}）`);
   const json = await res.json() as { choices?: { message?: { content?: string } }[] };
@@ -119,21 +117,29 @@ async function ocrImage(imageUrl: string, model: string, timeoutMs: number): Pro
 }
 
 /** 扫描件 OCR：每页最多取一张最大图像，避免把简历照片等装饰图重复送入模型。 */
-export async function extractTextFromScannedPdf(buffer: ArrayBuffer): Promise<OcrResult> {
-  const cfg = getLLMConfig();
-  if (!cfg) throw new Error('OCR 未配置大模型 API');
-  const model = process.env.OCR_MODEL?.trim() || 'qwen-vl-plus';
-  const doc = await getDocument({ data: new Uint8Array(buffer), useSystemFonts: true, isEvalSupported: false }).promise;
+export async function extractTextFromScannedPdf(buffer: ArrayBuffer, signal?: AbortSignal): Promise<OcrResult> {
+  const { model } = getOcrConfig();
+  const task = getDocument({ data: new Uint8Array(buffer.slice(0)), useSystemFonts: true, isEvalSupported: false });
+  const cancel = () => { void task.destroy().catch(() => undefined); };
+  signal?.throwIfAborted();
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+  const doc = await task.promise;
   const pages: string[] = [];
   const maxPages = Math.min(doc.numPages, 8);
   for (let i = 1; i <= maxPages; i++) {
+    signal?.throwIfAborted();
     const page = await doc.getPage(i);
     const images = await imagesFromPage(page as unknown as Parameters<typeof imagesFromPage>[0]);
     const image = images.sort((a, b) => b.width * b.height - a.width * a.height)[0];
     if (!image) continue;
-    pages.push(await ocrImage(imageToPng(image), model, 25_000));
+    pages.push(await ocrImage(imageToPng(image), model, 25_000, signal));
   }
   const text = pages.join('\n\n').replace(/\u0000/g, '').trim();
   if (text.length < 10) throw new Error('OCR 未识别到足够文字');
   return { text, pages: pages.length, model };
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+    await task.destroy();
+  }
 }
