@@ -4,18 +4,18 @@
 > 项目目录：`D:\CareerForge`
 > 仓库：https://github.com/lanyun077/CareerForge
 > 用途：帮助后续 agent 快速定位代码、识别版本差异、运行与验证项目。
-> 最新状态：2026-09-24，分支 `codex/baseline-validation`，HEAD `414dc07`；本轮实现、验证脚本和交接材料已提交为 `60d1b8f`、`414dc07`，相对 `origin/main` 超前 2 个提交，尚未推送或部署。已实现登录隔离、证据评分加固、输入确认、事务删除、强度设置、语音入口及 Greenhouse 受控真实岗位采集和来源报告；交接文档记录的构建、统一本地回归和依赖审计已通过。真实服务配置缺失，尚未完成多人试用验收。详见 `docs/连续开发验收记录.md` 和末尾记录。下文旧版/远端对照及早期验证均为历史。
+> 最新状态：2026-09-24，分支 `codex/baseline-validation`，HEAD `3b2cdae`；本轮实现、验证脚本和交接材料已整合提交并推送到 `origin/codex/baseline-validation`，相对 `origin/main` 超前 1 个提交。已实现登录隔离、证据评分加固、输入确认、事务删除、强度设置、语音入口及 Greenhouse 受控真实岗位采集和来源报告；交接文档记录的构建、统一本地回归和依赖审计已通过。真实服务配置缺失，尚未完成多人试用验收。`.github/workflows/check.yml` 因远端 OAuth 凭据缺少 `workflow` scope 保留在本地，未进入远端分支。详见 `docs/连续开发验收记录.md` 和末尾记录。下文旧版/远端对照及早期验证均为历史。
 
 ## 1. 先判断自己正在看哪个版本
 
 | 对象 | 本次核验结果 |
 |---|---|
-| 本地当前分支 / HEAD | `codex/baseline-validation` / `414dc07` |
+| 本地当前分支 / HEAD | `codex/baseline-validation` / `3b2cdae` |
 | 已获取的远端 main | `985e13a8260bff72611797eb3fb60a6a7e031796` |
 | 当前提交差距 | `git rev-list --left-right --count HEAD...origin/main` 为 `2 0` |
 | 远端新增提交 | `f05a984`（功能更新）、`d946c76`（忽略 IDE 设置）、`985e13a`（合并 PR #1） |
-| 本轮提交差异 | 88 个文件，4875 行新增、505 行删除 |
-| 当前工作区 | 仅保留 `test-data/` 下 7 个原有未跟踪文件 |
+| 本轮提交差异 | 87 个文件，4862 行新增、505 行删除 |
+| 当前工作区 | 保留 `.github/workflows/check.yml` 和 `test-data/` 下 7 个原有未跟踪文件 |
 | 原有未跟踪文件 | `test-data/` 下 7 个文件，见第 9 节；本次保留 |
 
 **fetch 不等于同步工作区。** 本地仍是旧版；本文件标注“新版”的文件需通过 `git show origin/main:路径` 阅读，或在后续同步后使用。上述提交是日期快照，每次接手重新核对。
